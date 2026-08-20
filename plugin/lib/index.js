@@ -15,9 +15,11 @@ function apply(ctx) {
 
   const REPO = 'deepseek-ai/deepseek-harness'
 
-  // 高置信度破坏性关键词(收紧版):只匹配明确表述破坏/不兼容的措辞,
-  // 避免「存储格式不兼容 / incompatible / 迁移 / 移除 / deprecated」等正常变更描述误报。
-  const BREAKING_PATTERNS = [
+  // 破坏性关键词分级:
+  // - STRONG:高置信度措辞 → 直接判破坏性(黄色预警 + 二次确认)
+  // - WEAK:宽泛的「不兼容 / 迁移 / 移除 / deprecated」等 → 同样黄色预警,
+  //   但向用户展示命中的关键词与原文片段,由用户核实是否真的破坏性。
+  const STRONG_PATTERNS = [
     /\bbreaking[- ]change[s]?\b/i,
     /\b(?:breaking|breaks?|broke)\s+compatibilit\w*\b/i,
     /\bnot\s+backward[- ]compatible\b/i,
@@ -27,6 +29,45 @@ function apply(ctx) {
     /破坏[^。\n]{0,12}兼容/,
     /不向后兼容/,
   ]
+  const WEAK_PATTERNS = [
+    /\bincompatible\b/i,
+    /\bmigration\b/i,
+    /\bmigrate\b/i,
+    /\bremoved\b/i,
+    /\bdeprecated\b/i,
+    /不兼容/,
+    /迁移/,
+    /移除/,
+    /不再支持/,
+  ]
+
+  // 提取每个模式的首次命中及其前后上下文片段(供用户核实判定依据)
+  function extractSignals(body, patterns) {
+    const out = []
+    for (const re of patterns) {
+      const m = re.exec(String(body || ''))
+      if (!m) continue
+      const idx = m.index
+      const raw = m[0]
+      const start = Math.max(0, idx - 30)
+      const end = Math.min(body.length, idx + raw.length + 30)
+      out.push({ keyword: raw, context: body.slice(start, end).replace(/\s+/g, ' ').trim() })
+    }
+    return out
+  }
+
+  function classifySignals(body) {
+    const strong = extractSignals(body, STRONG_PATTERNS)
+    const weak = extractSignals(body, WEAK_PATTERNS)
+    return {
+      strong: strong.length > 0,
+      weak: weak.length > 0,
+      matches: [
+        ...strong.map((m) => Object.assign({}, m, { level: 'strong' })),
+        ...weak.map((m) => Object.assign({}, m, { level: 'weak' })),
+      ].slice(0, 8),
+    }
+  }
 
   function parseVersion(text) {
     const m = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(text || '').trim())
@@ -179,16 +220,16 @@ function apply(ctx) {
     throw errors[errors.length - 1] || new Error('fetch-failed')
   }
 
-  // 官方发布说明中的破坏性关键词检测(尽力而为,失败不阻塞)。
-  // 仅匹配高置信度措辞,避免「存储格式不兼容 / incompatible / 迁移 / 移除」等正常描述误报。
-  async function fetchBreakingNote() {
+  // 官方发布说明中的破坏性信号检测(尽力而为,失败不阻塞)。
+  // 返回 { strong, weak, matches }——matches 为命中的关键词 + 原文片段,供 UI 展示判定依据。
+  async function fetchBreakingSignals() {
     try {
       const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases?per_page=1', 10000)
       const arr = JSON.parse(text)
       const body = Array.isArray(arr) && arr[0] ? String(arr[0].body || '') : ''
-      return BREAKING_PATTERNS.some((re) => re.test(body))
+      return classifySignals(body)
     } catch (e) {
-      return false
+      return { strong: false, weak: false, matches: [] }
     }
   }
 
@@ -199,23 +240,22 @@ function apply(ctx) {
       const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases/latest', 10000)
       const data = JSON.parse(text)
       if (data && typeof data.tag_name === 'string' && data.tag_name) {
-        return { tag: data.tag_name, source: 'releases', breakingNote: await fetchBreakingNote() }
+        return { tag: data.tag_name, source: 'releases', signals: await fetchBreakingSignals() }
       }
       lastError = new Error('parse-no-tag')
-    } catch (e) { lastError = e }
-    // 2) GitHub tags JSON
-    try {
-      const text = await fetchText('https://api.github.com/repos/' + REPO + '/tags', 10000)
-      const arr = JSON.parse(text)
-      if (Array.isArray(arr)) {
-        for (const item of arr) {
-          if (item && typeof item.name === 'string' && parseVersion(item.name)) {
-            return { tag: item.name, source: 'tags', breakingNote: await fetchBreakingNote() }
+      // 2) GitHub tags JSON
+      try {
+        const text = await fetchText('https://api.github.com/repos/' + REPO + '/tags', 10000)
+        const arr = JSON.parse(text)
+        if (Array.isArray(arr)) {
+          for (const item of arr) {
+            if (item && typeof item.name === 'string' && parseVersion(item.name)) {
+              return { tag: item.name, source: 'tags', signals: await fetchBreakingSignals() }
+            }
           }
         }
-      }
-      lastError = new Error('parse-no-tags')
-    } catch (e) { lastError = e }
+        lastError = new Error('parse-no-tags')
+      } catch (e) { lastError = e }
     // 3) releases 页面 HTML
     try {
       const text = await fetchText('https://github.com/' + REPO + '/releases/latest', 10000)
@@ -228,7 +268,7 @@ function apply(ctx) {
       const linkMatch = text.match(/\/releases\/tag\/([^"'<>\\\s]+)/)
       if (linkMatch) candidates.push(linkMatch[1])
       for (const c of candidates) {
-        if (parseVersion(c)) return { tag: c, source: 'html', breakingNote: await fetchBreakingNote() }
+        if (parseVersion(c)) return { tag: c, source: 'html', signals: await fetchBreakingSignals() }
       }
       lastError = new Error('parse-no-html')
     } catch (e) { lastError = e }
@@ -307,14 +347,16 @@ function apply(ctx) {
       const currentParsed = current ? parseVersion(current) : null
       const updateAvailable = !!(currentParsed && latestParsed && compareVersions(currentParsed, latestParsed) < 0)
       const breakingByVersion = !!(currentParsed && latestParsed && updateAvailable && isBreakingChange(currentParsed, latestParsed))
-      const breaking = breakingByVersion || !!latest.breakingNote
+      const signals = latest.signals || { strong: false, weak: false, matches: [] }
+      const breaking = breakingByVersion || signals.strong || signals.weak
       return {
         ok: true,
         current: current || null,
         latest: latest.tag,
         updateAvailable,
         breaking,
-        breakingReason: breakingByVersion ? 'version' : (latest.breakingNote ? 'release-notes' : null),
+        breakingReason: breakingByVersion ? 'version' : (signals.strong ? 'release-notes' : (signals.weak ? 'release-notes-weak' : null)),
+        breakingSignals: signals.matches || [],
         checkedAt: Date.now(),
         prerelease: !!latestParsed.pre,
         localUnreadable: !currentParsed,

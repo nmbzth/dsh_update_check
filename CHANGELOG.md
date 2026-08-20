@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0 — 破坏性信号分级 + 判定依据透明化
+
+- **新增**:关键词检测恢复宽泛(不兼容 / incompatible / migration / removed / deprecated / 迁移 / 移除 / 不再支持 等),并**分级**:
+  - 强信号(breaking change / 破坏性更新 / 破坏…兼容 等)→ 黄色预警「检测到破坏性更新」;
+  - 弱信号(宽泛词)→ 黄色预警「检测到**可能**破坏性更新」,二次确认页**列出命中关键词与原文片段**(如「…数据结构不兼容…」),由用户核实;
+- 语义版本信号(major / 0.x minor)不变。
+- 静态包与动态版同步更新;CI 断言更新(分级表、breakingSignals、release-notes-weak)。
+
 ## v1.1.0 — 静态插件化(持久加载)
 
 - **新增**:`plugin/` 目录 = npm 包 `dsh-update-check`(静态形态,推荐分发):

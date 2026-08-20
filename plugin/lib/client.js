@@ -34,6 +34,9 @@ window.__ModuleLoader__.load({
 			},
 			text: { minWidth: 0, overflowWrap: "anywhere" },
 			warningText: { color: "#ffc107", whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
+			signalRow: { display: "flex", flexDirection: "column", gap: 2, padding: "4px 8px", borderRadius: 6, background: "rgba(255,193,7,0.12)", width: "100%" },
+			signalKeyword: { color: "#ffd54f", fontWeight: 600 },
+			signalContext: { color: "#ffe082", overflowWrap: "anywhere" },
 			btnRow: { display: "flex", gap: 10 },
 			btnPrimary: { border: 0, borderRadius: 6, padding: "4px 10px", font: "inherit", cursor: "pointer", background: "#4c8dff", color: "#fff" },
 			btnWarning: { border: 0, borderRadius: 6, padding: "4px 10px", font: "inherit", cursor: "pointer", background: "#ffc107", color: "#3a2c00" },
@@ -52,7 +55,7 @@ window.__ModuleLoader__.load({
 		function createStore() {
 			let state = {
 				phase: "idle", current: null, latest: null, updateAvailable: false,
-				breaking: false, breakingReason: null, prerelease: false,
+				breaking: false, breakingReason: null, breakingSignals: [], prerelease: false,
 				localUnreadable: false, checkedAt: null, errorKind: null, message: null
 			};
 			const listeners = new Set();
@@ -99,6 +102,7 @@ window.__ModuleLoader__.load({
 						store.set({
 							phase: "update", current: res.current, latest: res.latest,
 							breaking: !!res.breaking, breakingReason: res.breakingReason || null,
+							breakingSignals: (res.breakingSignals) || [],
 							prerelease: !!res.prerelease, localUnreadable: !!res.localUnreadable, checkedAt: res.checkedAt
 						});
 					} else {
@@ -162,7 +166,8 @@ window.__ModuleLoader__.load({
 						: "已是最新版本 " + (state.latest || "?");
 				} else if (state.phase === "update") {
 					if (state.breaking) {
-						title = "⚠️ 检测到破坏性更新:" + (state.current || "?") + " → " + (state.latest || "?") + (state.prerelease ? "(预发布版)" : "");
+						title = (state.breakingReason === "release-notes-weak" ? "⚠️ 检测到可能破坏性更新:" : "⚠️ 检测到破坏性更新:")
+							+ (state.current || "?") + " → " + (state.latest || "?") + (state.prerelease ? "(预发布版)" : "");
 						buttons = [
 							{ label: "了解风险", primary: true, onClick: () => store.set({ phase: "confirm-breaking" }) },
 							{ label: "稍后", primary: false, onClick: () => store.set({ phase: "idle" }) }
@@ -176,9 +181,13 @@ window.__ModuleLoader__.load({
 					}
 				} else if (state.phase === "confirm-breaking") {
 					title = "⚠️ 确认更新 " + (state.current || "?") + " → " + (state.latest || "?") + "?";
-					detail = state.breakingReason === "release-notes"
-						? "官方发布说明包含破坏性变更提示(breaking / incompatible / 迁移 / 移除等)。更新后 DSH 可能与现有插件不兼容,建议先阅读发布说明,并确认插件兼容性。"
-						: "版本跨度较大(主版本/次要版本变更)。DSH 官方公告提示未来版本可能不兼容现有插件;更新后可能需要重新安装或调整插件。";
+					if (state.breakingReason === "version") {
+						detail = "版本跨度较大(主版本/次要版本变更)。DSH 官方公告提示未来版本可能不兼容现有插件;更新后可能需要重新安装或调整插件。";
+					} else if (state.breakingReason === "release-notes") {
+						detail = "官方发布说明包含破坏性变更提示。更新后 DSH 可能与现有插件不兼容,建议先阅读发布说明,并确认插件兼容性。";
+					} else {
+						detail = "官方发布说明包含以下疑似破坏性/不兼容相关描述,请核实是否影响插件兼容性:";
+					}
 					buttons = [
 						{ label: "我了解风险,确认更新", primary: true, onClick: () => { doInstall().catch(() => {}); } },
 						{ label: "取消", primary: false, onClick: () => store.set({ phase: "update" }) }
@@ -201,10 +210,15 @@ window.__ModuleLoader__.load({
 					buttons = [{ label: "关闭", primary: false, onClick: () => store.set({ phase: "idle" }) }];
 				}
 
+				const sig = state.breakingSignals || [];
 				const btnStyle = (b) => b.primary ? (warning ? STYLE.btnWarning : STYLE.btnPrimary) : STYLE.btnGhost;
 				return react.createElement("div", { style: warning ? STYLE.bannerWarning : STYLE.banner, role: "alert" },
 					react.createElement("span", { style: STYLE.text }, title),
 					detail ? react.createElement("div", { style: STYLE.warningText }, detail) : null,
+					sig.length > 0 ? sig.map((s) => react.createElement("div", { style: STYLE.signalRow, key: (s.keyword || "") + (s.context || "") },
+						react.createElement("span", { style: STYLE.signalKeyword }, "[" + (s.level === "strong" ? "强信号" : "弱信号") + "] 命中关键词: " + s.keyword),
+						react.createElement("span", { style: STYLE.signalContext }, "…" + (s.context || "") + "…")
+					)) : null,
 					react.createElement("div", { style: STYLE.btnRow },
 						buttons.map((b) => react.createElement("button", {
 							key: b.label,
@@ -249,7 +263,7 @@ window.__ModuleLoader__.load({
 					),
 					(state.phase === "update" && state.breaking)
 						? react.createElement("div", { style: STYLE.warningText },
-							"⚠️ 该更新被判定为破坏性变更(" + (state.breakingReason === "release-notes" ? "官方发布说明提示" : "大版本/次要版本变更") + "),可能需要再次确认。"
+							"⚠️ 该更新被判定为破坏性变更(" + (state.breakingReason === "version" ? "大版本/次要版本变更" : (state.breakingReason === "release-notes" ? "官方发布说明提示" : "发布说明含疑似不兼容描述,请核实")) + "),可能需要再次确认。"
 						)
 						: null,
 					react.createElement("div", { style: STYLE.actions },

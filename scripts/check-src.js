@@ -44,9 +44,9 @@ check(host.includes("harness.handle('check'"), 'host 注册 check RPC')
 check(host.includes("harness.handle('install'"), 'host 注册 install RPC')
 check(host.includes("'\\\\n'"), 'host 子脚本转义保留双反斜杠')
 check(host.includes('isBreakingChange'), 'host 含破坏性更新判定(isBreakingChange)')
-check(host.includes('fetchBreakingNote'), 'host 含发布说明关键词检测(fetchBreakingNote)')
-check(host.includes('breakingReason'), 'host 返回 breakingReason 判定来源')
-check(host.includes('BREAKING_PATTERNS'), 'host 含收紧版关键词表(BREAKING_PATTERNS)')
+check(host.includes('fetchBreakingSignals'), 'host 含发布说明信号检测(fetchBreakingSignals)')
+check(host.includes('breakingSignals'), 'host 返回 breakingSignals 判定依据')
+check(host.includes('STRONG_PATTERNS') && host.includes('WEAK_PATTERNS'), 'host 含分级关键词表(STRONG/WEAK)')
 check(host.includes('\\bbreaking[- ]change[s]?\\b'), 'host 关键词含整词 breaking change')
 
 // 3) Client 关键契约
@@ -61,6 +61,8 @@ check(client.includes('confirm-breaking'), 'client 含破坏性更新二次确�
 check(client.includes('upd-banner-warning'), 'client 含黄色高亮样式')
 check(client.includes('我了解风险,确认更新'), 'client 二次确认按钮文案')
 check(client.includes('再次确认更新'), 'client 设置页两段式确认')
+check(client.includes('breakingSignals'), 'client 展示 breakingSignals 判定依据')
+check(client.includes('release-notes-weak'), 'client 区分弱信号(可能破坏性)')
 
 // 4) 静态包(plugin/)契约
 const sHost = read('plugin/lib/index.js')
@@ -76,7 +78,8 @@ check(sHost.includes('webServer.register'), '静态 host 注册 webServer 路由
 check(sHost.includes('/upd-check/api/check'), '静态 host check 路由')
 check(sHost.includes('/upd-check/api/install'), '静态 host install 路由')
 check(sHost.includes('dns.resolve4'), '静态 host 含 hosts 绕过')
-check(sHost.includes('BREAKING_PATTERNS'), '静态 host 含破坏性关键词表')
+check(sHost.includes('STRONG_PATTERNS') && sHost.includes('WEAK_PATTERNS'), '静态 host 含分级关键词表')
+check(sHost.includes('breakingSignals'), '静态 host 返回判定依据')
 check(!sHost.includes('harness.'), '静态 host 不依赖 harness')
 check(/window\.__ModuleLoader__\.load/.test(sClient), '静态 client 为 ModuleLoader bundle')
 check(sClient.includes('exports.inject = ["slots"]') || sClient.includes("exports.inject = ['slots']"), '静态 client 注入 slots')

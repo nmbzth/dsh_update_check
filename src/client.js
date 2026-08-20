@@ -24,11 +24,14 @@ return {
       '.upd-actions{display:flex;gap:10px}' +
       '.upd-actions button{border:0;border-radius:6px;padding:6px 14px;font:inherit;cursor:pointer}' +
       '.upd-error{color:#ff6b6b;white-space:pre-wrap;overflow-wrap:anywhere}' +
-      '.upd-warning-text{color:#ffc107;white-space:pre-wrap;overflow-wrap:anywhere}'
+      '.upd-warning-text{color:#ffc107;white-space:pre-wrap;overflow-wrap:anywhere}' +
+      '.upd-signal-row{display:flex;flex-direction:column;gap:2px;padding:4px 8px;border-radius:6px;background:rgba(255,193,7,0.12);width:100%}' +
+      '.upd-signal-keyword{color:#ffd54f;font-weight:600}' +
+      '.upd-signal-context{color:#ffe082;overflow-wrap:anywhere}'
     ))
 
     const store = {
-      state: { phase: 'idle', current: null, latest: null, updateAvailable: false, breaking: false, breakingReason: null, prerelease: false, localUnreadable: false, checkedAt: null, errorKind: null, message: null },
+      state: { phase: 'idle', current: null, latest: null, updateAvailable: false, breaking: false, breakingReason: null, breakingSignals: [], prerelease: false, localUnreadable: false, checkedAt: null, errorKind: null, message: null },
       listeners: new Set(),
       set(patch) {
         this.state = Object.assign({}, this.state, patch)
@@ -53,7 +56,7 @@ return {
           return
         }
         if (res.updateAvailable) {
-          store.set({ phase: 'update', current: res.current, latest: res.latest, breaking: !!res.breaking, breakingReason: res.breakingReason || null, prerelease: !!res.prerelease, localUnreadable: !!res.localUnreadable, checkedAt: res.checkedAt })
+          store.set({ phase: 'update', current: res.current, latest: res.latest, breaking: !!res.breaking, breakingReason: res.breakingReason || null, breakingSignals: (res.breakingSignals) || [], prerelease: !!res.prerelease, localUnreadable: !!res.localUnreadable, checkedAt: res.checkedAt })
         } else {
           store.set({ phase: 'up-to-date', current: res.current, latest: res.latest, localUnreadable: !!res.localUnreadable, checkedAt: res.checkedAt })
         }
@@ -110,7 +113,8 @@ return {
           : '已是最新版本 ' + (state.latest || '?')
       } else if (state.phase === 'update') {
         if (state.breaking) {
-          title = '⚠️ 检测到破坏性更新:' + (state.current || '?') + ' → ' + (state.latest || '?') + (state.prerelease ? '(预发布版)' : '')
+          title = (state.breakingReason === 'release-notes-weak' ? '⚠️ 检测到可能破坏性更新:' : '⚠️ 检测到破坏性更新:')
+            + (state.current || '?') + ' → ' + (state.latest || '?') + (state.prerelease ? '(预发布版)' : '')
           buttons = [
             { label: '了解风险', primary: true, onClick: () => store.set({ phase: 'confirm-breaking' }) },
             { label: '稍后', primary: false, onClick: () => store.set({ phase: 'idle' }) },
@@ -124,9 +128,13 @@ return {
         }
       } else if (state.phase === 'confirm-breaking') {
         title = '⚠️ 确认更新 ' + (state.current || '?') + ' → ' + (state.latest || '?') + '?'
-        detail = state.breakingReason === 'release-notes'
-          ? '官方发布说明包含破坏性变更提示(breaking / incompatible / 迁移 / 移除等)。更新后 DSH 可能与现有插件不兼容,建议先阅读发布说明,并确认插件兼容性。'
-          : '版本跨度较大(主版本/次要版本变更)。DSH 官方公告提示未来版本可能不兼容现有插件;更新后可能需要重新安装或调整插件。'
+        if (state.breakingReason === 'version') {
+          detail = '版本跨度较大(主版本/次要版本变更)。DSH 官方公告提示未来版本可能不兼容现有插件;更新后可能需要重新安装或调整插件。'
+        } else if (state.breakingReason === 'release-notes') {
+          detail = '官方发布说明包含破坏性变更提示。更新后 DSH 可能与现有插件不兼容,建议先阅读发布说明,并确认插件兼容性。'
+        } else {
+          detail = '官方发布说明包含以下疑似破坏性/不兼容相关描述,请核实是否影响插件兼容性:'
+        }
         buttons = [
           { label: '我了解风险,确认更新', primary: true, onClick: () => { doInstall().catch(() => {}) } },
           { label: '取消', primary: false, onClick: () => store.set({ phase: 'update' }) },
@@ -152,6 +160,10 @@ return {
       return React.createElement('div', { className: warning ? 'upd-banner upd-banner-warning' : 'upd-banner', role: 'alert' },
         React.createElement('span', { className: 'upd-banner-text' }, title),
         detail ? React.createElement('div', { className: 'upd-warning-text' }, detail) : null,
+        (state.breakingSignals || []).map((s) => React.createElement('div', { className: 'upd-signal-row', key: (s.keyword || '') + (s.context || '') },
+          React.createElement('span', { className: 'upd-signal-keyword' }, '[' + (s.level === 'strong' ? '强信号' : '弱信号') + '] 命中关键词: ' + s.keyword),
+          React.createElement('span', { className: 'upd-signal-context' }, '…' + (s.context || '') + '…'),
+        )),
         buttons.map((b) => React.createElement('button', {
           key: b.label,
           className: b.primary ? 'upd-btn-primary' : 'upd-btn-ghost',
@@ -199,7 +211,7 @@ return {
         ),
         (state.phase === 'update' && state.breaking)
           ? React.createElement('div', { className: 'upd-warning-text' },
-            '⚠️ 该更新被判定为破坏性变更(' + (state.breakingReason === 'release-notes' ? '官方发布说明提示' : '大版本/次要版本变更') + '),可能需要再次确认。',
+            '⚠️ 该更新被判定为破坏性变更(' + (state.breakingReason === 'version' ? '大版本/次要版本变更' : (state.breakingReason === 'release-notes' ? '官方发布说明提示' : '发布说明含疑似不兼容描述,请核实')) + '),可能需要再次确认。',
           )
           : null,
         React.createElement('div', { className: 'upd-actions' },
