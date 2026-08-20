@@ -45,6 +45,8 @@ check(host.includes("'\\\\n'"), 'host 子脚本转义保留双反斜杠')
 check(host.includes('isBreakingChange'), 'host 含破坏性更新判定(isBreakingChange)')
 check(host.includes('fetchBreakingNote'), 'host 含发布说明关键词检测(fetchBreakingNote)')
 check(host.includes('breakingReason'), 'host 返回 breakingReason 判定来源')
+check(host.includes('BREAKING_PATTERNS'), 'host 含收紧版关键词表(BREAKING_PATTERNS)')
+check(host.includes('\\bbreaking[- ]change[s]?\\b'), 'host 关键词含整词 breaking change')
 
 // 3) Client 关键契约
 check(client.includes('shell.overlay'), 'client 挂载 shell.overlay 横幅')

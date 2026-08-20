@@ -10,6 +10,19 @@ return {
 
     const REPO = 'deepseek-ai/deepseek-harness'
 
+    // 高置信度破坏性关键词(收紧版):只匹配明确表述破坏/不兼容的措辞,
+    // 避免「存储格式不兼容 / incompatible / 迁移 / 移除 / deprecated」等正常变更描述误报。
+    const BREAKING_PATTERNS = [
+      /\bbreaking[- ]change[s]?\b/i,
+      /\b(?:breaking|breaks?|broke)\s+compatibilit\w*\b/i,
+      /\bnot\s+backward[- ]compatible\b/i,
+      /\bbackward[- ]incompatible\b/i,
+      /\bbc[- ]break[s]?\b/i,
+      /破坏性(?:更新|变更|修改|改动)/,
+      /破坏[^。\n]{0,12}兼容/,
+      /不向后兼容/,
+    ]
+
     function parseVersion(text) {
       const m = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(text || '').trim())
       if (!m) return null
@@ -161,13 +174,14 @@ return {
       throw errors[errors.length - 1] || new Error('fetch-failed')
     }
 
-    // 官方发布说明中的破坏性关键词检测(尽力而为,失败不阻塞)
+    // 官方发布说明中的破坏性关键词检测(尽力而为,失败不阻塞)。
+    // 仅匹配高置信度措辞,避免「存储格式不兼容 / incompatible / 迁移 / 移除」等正常描述误报。
     async function fetchBreakingNote() {
       try {
         const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases?per_page=1', 10000)
         const arr = JSON.parse(text)
         const body = Array.isArray(arr) && arr[0] ? String(arr[0].body || '') : ''
-        return /(breaking\s*change|breaking|incompatible|migration|migrate|removed|deprecated|破坏性|不兼容|迁移|移除|不再支持)/i.test(body)
+        return BREAKING_PATTERNS.some((re) => re.test(body))
       } catch (e) {
         return false
       }

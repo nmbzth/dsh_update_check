@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.1(pkg-6)— 修复破坏性检测误报
+
+- **修复**:官方 rc.8 发布说明含「数据结构不兼容 / storage format is incompatible」被误判为破坏性更新(实为 SQLite 存储格式内部变更)。关键词检测收紧为**高置信度措辞**:`breaking change`、`breaks compatibility`、`not backward compatible`、`backward-incompatible`、`BC break`、`破坏性更新/变更`、`破坏…兼容`、`不向后兼容`;**移除**宽泛的 `incompatible / migration / removed / deprecated / 不兼容 / 迁移 / 移除` 等正常变更描述词。语义版本判定(major / 0.x minor)不受影响。
+- 误报场景验证:rc.7 → rc.8(同 major/minor/patch)→ 判定为非破坏性,显示普通「发现新版本」。
+
 ## v0.5.0(pkg-5)— 破坏性更新检测 + 二次确认
 
 - **新增**:破坏性更新判定(双重信号,任一命中即判破坏性):

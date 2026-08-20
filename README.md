@@ -61,7 +61,7 @@
 | GitHub 匿名 API 限流 | ⚠️ | 60 次/小时/IP;每次页面加载自动检查 1 次,手动检查按需触发,一般足够 |
 | 安装更新 | ⚠️ | 执行 `npm install -g @deepseek-ai/dsh@latest`,仅对 npm 管理安装生效;非 npm 安装请手动升级 |
 | DSH 版本适配 | ⚠️ | 插槽名(`shell.overlay`、`settings.plugins.tab`)以 0.1.0-rc.x 实测为准;未来版本若插槽树变化,UI 不挂载但不会崩溃,Host 检查功能不受影响 |
-| 破坏性更新判定 | ✅ | semver 判定确定性可靠;发布说明关键词为尽力而为(README 说明),两者任一命中即黄色预警 + 二次确认 |
+| 破坏性更新判定 | ✅ | semver 判定确定性可靠;发布说明关键词为**高置信度措辞**(`breaking change` / `breaks compatibility` / `not backward compatible` / 破坏性更新 / 破坏…兼容 等),已修复「存储格式不兼容」类描述误报;两者任一命中即黄色预警 + 二次确认 |
 
 ## 疑难解答
 
