@@ -243,8 +243,9 @@ function apply(ctx) {
         return { tag: data.tag_name, source: 'releases', signals: await fetchBreakingSignals() }
       }
       lastError = new Error('parse-no-tag')
-      // 2) GitHub tags JSON
-      try {
+    } catch (e) { lastError = e }
+    // 2) GitHub tags JSON
+    try {
         const text = await fetchText('https://api.github.com/repos/' + REPO + '/tags', 10000)
         const arr = JSON.parse(text)
         if (Array.isArray(arr)) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0 — 移除动态版,仅保留静态插件
+
+- **移除**:`src/` 动态插件版(harness RPC)已删除,仓库只保留 `plugin/` 静态包 `dsh-update-check`。
+- CI 精简为 31 项(仅静态包);`check-src.js` 新增 host 语法检查——顺带修复了 `fetchLatest` 中 releases try 块缺失闭合的潜在语法隐患(该隐患在旧断言下不会被发现)。
+- README/CHANGELOG 同步清理动态版相关内容。
+
 ## v1.2.0 — 破坏性信号分级 + 判定依据透明化
 
 - **新增**:关键词检测恢复宽泛(不兼容 / incompatible / migration / removed / deprecated / 迁移 / 移除 / 不再支持 等),并**分级**:

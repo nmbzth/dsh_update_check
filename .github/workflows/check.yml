@@ -3,9 +3,9 @@ name: src-check
 on:
   push:
     branches: [main]
-    paths: ['src/**', 'plugin/**', 'scripts/**', '.github/workflows/**']
+    paths: ['plugin/**', 'scripts/**', '.github/workflows/**']
   pull_request:
-    paths: ['src/**', 'plugin/**', 'scripts/**']
+    paths: ['plugin/**', 'scripts/**']
 
 jobs:
   validate:
