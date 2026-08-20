@@ -43,6 +43,8 @@ check(sHost.includes('/upd-check/api/install/status'), 'host install 状态轮�
 check(sHost.includes('installJob'), 'host 安装为后台任务(installJob)')
 check(sHost.includes('--loglevel=info'), 'host 安装输出文件变动信息(loglevel=info)')
 check(sHost.includes('powershell.exe') && sHost.includes('psCmd'), 'host Windows 优先用 PowerShell 执行安装')
+check(sHost.includes('lastCheck') && sHost.includes('npmVersionFromTag'), 'host 记住检测到的远端版本(lastCheck)')
+check(sHost.includes('@deepseek-ai/dsh@') && sHost.includes('lastCheck.version'), 'host 安装检测到的具体版本而非 npm latest')
 check(sHost.includes('UPD_URL') && sHost.includes('dns.resolve4'), 'host 含 node 直连 + hosts 绕过通道')
 check(sHost.includes('resolveExecutable'), 'host 用 resolveExecutable 解析 node')
 check(sHost.includes('npm ls -g @deepseek-ai/dsh'), 'host 检测 npm 全局安装版本')

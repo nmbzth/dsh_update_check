@@ -43,7 +43,7 @@
 
 | 半区 | 职责 |
 | --- | --- |
-| Host（`plugin/lib/index.js`） | 拉取 GitHub 官方 API、读取本地已装版本（`npm ls -g` → `npm root -g` + 读 package.json）、版本比较、破坏性更新判定、执行 `npm install -g @deepseek-ai/dsh@latest`（自动解析 `npm.cmd`/`npm` 真实路径，并把 npm 缓存重定向到沙箱可写目录，避免权限/沙箱导致的安装失败；Windows 优先用 **PowerShell** 执行，回退 `cmd.exe`/`sh`）；安装为**后台任务**，`POST /upd-check/api/install` 启动、`GET /upd-check/api/install/status` 轮询进度/阶段/文件变动 |
+| Host（`plugin/lib/index.js`） | 拉取 GitHub 官方 API、读取本地已装版本（`npm ls -g` → `npm root -g` + 读 package.json）、版本比较、破坏性更新判定、安装 **check 检测到的具体版本**（`npm install -g @deepseek-ai/dsh@<版本>`，无检测记录时回退 `@latest`；自动解析 `npm.cmd`/`npm` 真实路径，并把 npm 缓存重定向到沙箱可写目录，避免权限/沙箱导致的安装失败；Windows 优先用 **PowerShell** 执行，回退 `cmd.exe`/`sh`）；安装为**后台任务**，`POST /upd-check/api/install` 启动、`GET /upd-check/api/install/status` 轮询进度/阶段/文件变动 |
 | Client（`plugin/lib/client.js`） | `shell.overlay` 顶部横幅 + 设置区独立「↑ 检查更新」页（`settings.section`）；安装时显示**右侧带百分比的进度条** + **文件变动窗口**；完成后**绿色弹窗**提示重启、设置页绿色状态文字 |
 | 通信 | `webServer` HTTP 路由 + 同源 fetch |
 
@@ -63,7 +63,7 @@
 | hosts 劫持（Steamcommunity302 等） | ✅ | 内置 DNS 直连绕过 |
 | 未挂载 fetch provider 的部署 | ✅ | node 直连通道兜底 |
 | GitHub 匿名 API 限流 | ⚠️ | 60 次/小时/IP；每次页面加载自动检查 1 次，手动检查按需触发，一般足够 |
-| 安装更新 | ⚠️ | 执行 `npm install -g @deepseek-ai/dsh@latest`（已自动解析 npm 路径 + 重定向缓存到沙箱可写目录）；仅对 npm 管理安装生效；若全局目录本身无写权限，会给出手动执行提示 |
+| 安装更新 | ⚠️ | 安装 **check 检测到的具体版本**（`@deepseek-ai/dsh@<版本>`，无检测记录时回退 `@latest`；已自动解析 npm 路径 + 重定向缓存到沙箱可写目录）；仅对 npm 管理安装生效；若全局目录本身无写权限，会给出手动执行提示 |
 | DSH 版本适配 | ⚠️ | 插槽名（`shell.overlay`、`settings.section`）以 0.1.0-rc.x 实测为准；未来版本若插槽树变化，UI 不挂载但不会崩溃，Host 检查功能不受影响 |
 | 破坏性更新判定 | ✅ | semver 判定确定性可靠；发布说明关键词分级（强信号直接判破坏性；弱信号黄色预警并展示命中关键词与原文片段供核实）；任一命中即黄色预警 + 二次确认 |
 | 静态插件 | ✅ | 随 DSH 启动自动加载，重启/更新 DSH 后无需重装；Host 无 `harness`，走 `webServer` HTTP 接口（同源，仅本机监听） |
@@ -74,11 +74,12 @@
 - **插件未生效**：确认 `node_modules/dsh-update-check` 存在、`cordis.patch.yml` 已插入行、**重启 DSH**；检查 `GET /upd-check/api/check` 是否返回 JSON。
 - **设置区没有「检查更新」页**：确认 client bundle 被扫描（重启后刷新页面）；「检查更新」现在位于设置区的**顶级页**（与通用设置/模型/插件同级），不再在「插件」页内。
 - **「无法读取本地版本」**：DSH 不是通过 npm 全局安装的；远端版本仍会正常显示。
-- **点「更新」后安装失败**：插件已自动解析 npm 真实路径并把 npm 缓存重定向到沙箱可写目录；若仍失败，失败信息会给出具体原因。若提示 EPERM/EACCES/权限拒绝，多半是 DSH 文件沙箱不允许写 npm 全局目录（`%APPDATA%\npm`），请关闭 DSH 后在终端手动执行 `npm install -g @deepseek-ai/dsh@latest`。
+- **点「更新」后安装失败**：插件已自动解析 npm 真实路径并把 npm 缓存重定向到沙箱可写目录；若仍失败，失败信息会给出具体原因。若提示 EPERM/EACCES/权限拒绝，多半是 DSH 文件沙箱不允许写 npm 全局目录（`%APPDATA%\npm`），请关闭 DSH 后在终端手动执行安装命令（用检测到的版本，如 `npm install -g @deepseek-ai/dsh@0.1.0-rc.8`，或该版本只发布在 `next` 标签时用 `@next`）。
+- **显示「安装成功」但版本没变**：GitHub 检测到新 tag（如 `dsh-v0.1.0-rc.8`）时，npm 的 `latest` 标签可能仍指向旧版（rc.8 挂在 `next` 标签）。v1.6.0 起插件改为安装 check 检测到的**具体版本**，不再出现此问题；若仍遇到，重启 DSH 后手动执行 `npm install -g @deepseek-ai/dsh@<检测到的版本>`。
 - **点「稍后」后横幅又出现**：v1.5.0 起 client 会记住忽略的版本号；同一版本在连接重置、重复加载甚至设置页手动「立即检查」后都不再弹窗。需要再次处理该更新时，直接在设置 → 检查更新页点「安装更新」；只有官方发布新版本（`latest` 变化）时横幅才会再次出现。
 - **设置页点「立即检查」时顶部弹横幅**：v1.5.0 起设置页手动检查只更新设置页自身状态（状态行/按钮），不再弹顶部横幅（包括「正在检查更新…」和已忽略的风险信号）；顶部横幅只负责自动检查提醒与横幅内操作（重试/立即更新）。
 - **黄色预警误报/漏报**：破坏性判定以语义版本为主（确定性），发布说明关键词为辅；弱信号只提示"可能"并展示原文片段，由你核实；若官方发布说明措辞不含关键词，可能漏报 release-notes 信号，但版本信号仍会兜底。
-- **为什么这次更新没看到破坏性预警**：破坏性检查仍然存在。当前 `0.1.0-rc.7 → 0.1.0-rc.8` 的 major/minor/patch 相同，按语义版本规则**不属于破坏性更新**（这是之前修复误报后的既定行为）；发布说明关键词信号依赖 GitHub releases API，属尽力而为，若接口不可用或措辞不含关键词则不会提示。真正的大版本/破坏性更新仍会黄色预警 + 二次确认。
+- **为什么这次更新没看到破坏性预警**：破坏性检查仍然存在。`0.1.0-rc.7 → 0.1.0-rc.8` 的 major/minor/patch 相同，按语义版本规则**不属于版本信号破坏性更新**；但若官方发布说明命中弱信号关键词（如「数据结构不兼容 / incompatible」），仍会黄色提示「检测到**可能**破坏性更新」并列出命中片段。发布说明关键词信号依赖 GitHub releases API，属尽力而为，若接口不可用或措辞不含关键词则只按普通更新提示。真正的大版本/破坏性更新（major 或 0.x minor 变化）必定黄色预警 + 二次确认。
 
 ## 开发与贡献
 

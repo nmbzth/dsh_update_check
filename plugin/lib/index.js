@@ -365,6 +365,7 @@ function apply(ctx) {
       const breakingByVersion = !!(currentParsed && latestParsed && updateAvailable && isBreakingChange(currentParsed, latestParsed))
       const signals = latest.signals || { strong: false, weak: false, matches: [] }
       const breaking = breakingByVersion || signals.strong || signals.weak
+      lastCheck = { tag: latest.tag, version: npmVersionFromTag(latest.tag) }
       return {
         ok: true,
         current: current || null,
@@ -385,6 +386,16 @@ function apply(ctx) {
 
   // ===== 安装更新(后台任务 + 状态轮询,支持实时进度条与文件变动窗口) =====
   let installJob = null
+  // 最近一次 check 的远端版本,安装时安装该具体版本而不是 npm `latest` 标签:
+  // GitHub 检测到 rc.8 时,npm 的 `latest` 可能仍是 rc.7(rc.8 在 `next` 标签),
+  // 用 @latest 会「安装成功」但版本不变,导致设置页无法真正更新。
+  let lastCheck = null
+
+  function npmVersionFromTag(tag) {
+    const m = parseVersion(tag)
+    if (!m) return null
+    return m.major + '.' + m.minor + '.' + m.patch + (m.pre ? '-' + m.pre.join('.') : '')
+  }
 
   function pushInstallLog(job, line) {
     job.lines.push(line)
@@ -433,8 +444,13 @@ function apply(ctx) {
           cacheFlag = ' --cache "' + cwd.replace(/\\/g, '/') + '/.dsh-update-cache"'
         }
       } catch (e) { /* 拿不到 cwd 时用 npm 默认缓存 */ }
+      // 安装 check 检测到的具体版本;没有检测记录时回退 @latest
+      // (GitHub 的 rc.8 在 npm 上可能只挂在 `next` 标签,@latest 装不到)
+      const pkgSpec = lastCheck && lastCheck.version
+        ? '@deepseek-ai/dsh@' + lastCheck.version
+        : '@deepseek-ai/dsh@latest'
       // --loglevel=info 让 npm 输出 add/remove/change/reify 等文件变动信息
-      const cmdline = npmCmd + ' install -g @deepseek-ai/dsh@latest' + cacheFlag + ' --no-audit --no-fund --loglevel=info'
+      const cmdline = npmCmd + ' install -g ' + pkgSpec + cacheFlag + ' --no-audit --no-fund --loglevel=info'
       // PowerShell 版命令(Windows 优先):用单引号包路径,避免外层引号转义问题
       let cacheDir = ''
       try {
@@ -442,7 +458,7 @@ function apply(ctx) {
         if (cwd && cwd !== '.') cacheDir = cwd.replace(/\\/g, '/') + '/.dsh-update-cache'
       } catch (e) { /* 拿不到 cwd 时用 npm 默认缓存 */ }
       const psNpm = npm ? "'" + npm.replace(/'/g, "''") + "'" : 'npm'
-      const psCmd = '& ' + psNpm + ' install -g @deepseek-ai/dsh@latest' +
+      const psCmd = '& ' + psNpm + ' install -g ' + pkgSpec +
         (cacheDir ? " --cache '" + cacheDir.replace(/'/g, "''") + "'" : '') +
         ' --no-audit --no-fund --loglevel=info'
       const job = {
