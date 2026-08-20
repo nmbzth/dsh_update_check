@@ -1,0 +1,2 @@
+# dsh_auto_update
+dsh_auto_update是一个dsh插件，能自动检查dsharness官方上游仓库比对差异并提示更新
