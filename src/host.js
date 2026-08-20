@@ -40,6 +40,14 @@ return {
       return 0
     }
 
+    // 破坏性更新判定(语义版本层面):major 变化,或 0.x 阶段 minor 变化(0.x 中 minor 即事实上的主版本)
+    function isBreakingChange(current, latest) {
+      if (!current || !latest) return false
+      if (current.major !== latest.major) return true
+      if (current.major === 0 && current.minor !== latest.minor) return true
+      return false
+    }
+
     function withTimeout(task, timeoutMs) {
       if (!timer) return task
       return Promise.race([task, timer.timeout(timeoutMs).then(() => { throw new Error('fetch-timeout') })])
@@ -153,6 +161,18 @@ return {
       throw errors[errors.length - 1] || new Error('fetch-failed')
     }
 
+    // 官方发布说明中的破坏性关键词检测(尽力而为,失败不阻塞)
+    async function fetchBreakingNote() {
+      try {
+        const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases?per_page=1', 10000)
+        const arr = JSON.parse(text)
+        const body = Array.isArray(arr) && arr[0] ? String(arr[0].body || '') : ''
+        return /(breaking\s*change|breaking|incompatible|migration|migrate|removed|deprecated|破坏性|不兼容|迁移|移除|不再支持)/i.test(body)
+      } catch (e) {
+        return false
+      }
+    }
+
     async function fetchLatest() {
       let lastError = null
       // 1) GitHub releases/latest JSON
@@ -160,7 +180,7 @@ return {
         const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases/latest', 10000)
         const data = JSON.parse(text)
         if (data && typeof data.tag_name === 'string' && data.tag_name) {
-          return { tag: data.tag_name, source: 'releases' }
+          return { tag: data.tag_name, source: 'releases', breakingNote: await fetchBreakingNote() }
         }
         lastError = new Error('parse-no-tag')
       } catch (e) { lastError = e }
@@ -171,7 +191,7 @@ return {
         if (Array.isArray(arr)) {
           for (const item of arr) {
             if (item && typeof item.name === 'string' && parseVersion(item.name)) {
-              return { tag: item.name, source: 'tags' }
+              return { tag: item.name, source: 'tags', breakingNote: await fetchBreakingNote() }
             }
           }
         }
@@ -189,7 +209,7 @@ return {
         const linkMatch = text.match(/\/releases\/tag\/([^"'<>\\\s]+)/)
         if (linkMatch) candidates.push(linkMatch[1])
         for (const c of candidates) {
-          if (parseVersion(c)) return { tag: c, source: 'html' }
+          if (parseVersion(c)) return { tag: c, source: 'html', breakingNote: await fetchBreakingNote() }
         }
         lastError = new Error('parse-no-html')
       } catch (e) { lastError = e }
@@ -268,11 +288,15 @@ return {
           try { current = await detectLocalVersion() } catch (e) { current = null }
           const currentParsed = current ? parseVersion(current) : null
           const updateAvailable = !!(currentParsed && latestParsed && compareVersions(currentParsed, latestParsed) < 0)
+          const breakingByVersion = !!(currentParsed && latestParsed && updateAvailable && isBreakingChange(currentParsed, latestParsed))
+          const breaking = breakingByVersion || !!latest.breakingNote
           return {
             ok: true,
             current: current || null,
             latest: latest.tag,
             updateAvailable,
+            breaking,
+            breakingReason: breakingByVersion ? 'version' : (latest.breakingNote ? 'release-notes' : null),
             checkedAt: Date.now(),
             prerelease: !!latestParsed.pre,
             localUnreadable: !currentParsed,

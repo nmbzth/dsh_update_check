@@ -42,6 +42,9 @@ check(host.includes('npm ls -g @deepseek-ai/dsh'), 'host 检测 npm 全局安装
 check(host.includes("harness.handle('check'"), 'host 注册 check RPC')
 check(host.includes("harness.handle('install'"), 'host 注册 install RPC')
 check(host.includes("'\\\\n'"), 'host 子脚本转义保留双反斜杠')
+check(host.includes('isBreakingChange'), 'host 含破坏性更新判定(isBreakingChange)')
+check(host.includes('fetchBreakingNote'), 'host 含发布说明关键词检测(fetchBreakingNote)')
+check(host.includes('breakingReason'), 'host 返回 breakingReason 判定来源')
 
 // 3) Client 关键契约
 check(client.includes('shell.overlay'), 'client 挂载 shell.overlay 横幅')
@@ -51,6 +54,10 @@ check(client.includes('无法连接 GitHub'), 'client 网络错误提示')
 check(client.includes('已是最新版本'), 'client 已是最新提示')
 check(client.includes('立即更新'), 'client 发现更新常驻横幅')
 check(client.includes('host.call('), 'client 使用 host RPC')
+check(client.includes('confirm-breaking'), 'client 含破坏性更新二次确认态')
+check(client.includes('upd-banner-warning'), 'client 含黄色高亮样式')
+check(client.includes('我了解风险,确认更新'), 'client 二次确认按钮文案')
+check(client.includes('再次确认更新'), 'client 设置页两段式确认')
 
 console.log(failed ? 'RESULT: FAILED' : 'RESULT: ALL PASS')
 process.exit(failed ? 1 : 0)

@@ -12,6 +12,10 @@ return {
       '.upd-btn-primary{background:#4c8dff;color:#fff}' +
       '.upd-btn-primary:disabled{opacity:0.5;cursor:default}' +
       '.upd-btn-ghost{background:rgba(255,255,255,0.16);color:#fff}' +
+      '.upd-banner-warning{background:rgba(122,92,0,0.96);border:1px solid #ffc107;color:#ffe082}' +
+      '.upd-banner-warning .upd-btn-primary{background:#ffc107;color:#3a2c00}' +
+      '.upd-btn-warning{background:#ffc107;color:#3a2c00}' +
+      '.upd-btn-danger{background:#e53935;color:#fff}' +
       '.upd-tab{display:flex;flex-direction:column;gap:14px;max-width:520px;font:13px/1.6 system-ui,sans-serif}' +
       '.upd-tab h3{margin:0;font-size:15px}' +
       '.upd-tab-body{display:flex;flex-direction:column;border-top:1px solid rgba(128,128,128,0.3)}' +
@@ -19,11 +23,12 @@ return {
       '.upd-row span:first-child{opacity:0.7}' +
       '.upd-actions{display:flex;gap:10px}' +
       '.upd-actions button{border:0;border-radius:6px;padding:6px 14px;font:inherit;cursor:pointer}' +
-      '.upd-error{color:#ff6b6b;white-space:pre-wrap;overflow-wrap:anywhere}'
+      '.upd-error{color:#ff6b6b;white-space:pre-wrap;overflow-wrap:anywhere}' +
+      '.upd-warning-text{color:#ffc107;white-space:pre-wrap;overflow-wrap:anywhere}'
     ))
 
     const store = {
-      state: { phase: 'idle', current: null, latest: null, updateAvailable: false, prerelease: false, localUnreadable: false, checkedAt: null, errorKind: null, message: null },
+      state: { phase: 'idle', current: null, latest: null, updateAvailable: false, breaking: false, breakingReason: null, prerelease: false, localUnreadable: false, checkedAt: null, errorKind: null, message: null },
       listeners: new Set(),
       set(patch) {
         this.state = Object.assign({}, this.state, patch)
@@ -48,7 +53,7 @@ return {
           return
         }
         if (res.updateAvailable) {
-          store.set({ phase: 'update', current: res.current, latest: res.latest, prerelease: !!res.prerelease, localUnreadable: !!res.localUnreadable, checkedAt: res.checkedAt })
+          store.set({ phase: 'update', current: res.current, latest: res.latest, breaking: !!res.breaking, breakingReason: res.breakingReason || null, prerelease: !!res.prerelease, localUnreadable: !!res.localUnreadable, checkedAt: res.checkedAt })
         } else {
           store.set({ phase: 'up-to-date', current: res.current, latest: res.latest, localUnreadable: !!res.localUnreadable, checkedAt: res.checkedAt })
         }
@@ -93,8 +98,10 @@ return {
       }, [state.phase])
       if (state.phase === 'idle') return null
 
+      const warning = state.phase === 'update' && state.breaking
       let title = ''
       let buttons = []
+      let detail = null
       if (state.phase === 'checking') {
         title = '正在检查更新…'
       } else if (state.phase === 'up-to-date') {
@@ -102,10 +109,27 @@ return {
           ? '最新版本 ' + (state.latest || '?') + '(无法读取本地版本)'
           : '已是最新版本 ' + (state.latest || '?')
       } else if (state.phase === 'update') {
-        title = '发现新版本:' + (state.current || '?') + ' → ' + (state.latest || '?') + (state.prerelease ? '(预发布版)' : '')
+        if (state.breaking) {
+          title = '⚠️ 检测到破坏性更新:' + (state.current || '?') + ' → ' + (state.latest || '?') + (state.prerelease ? '(预发布版)' : '')
+          buttons = [
+            { label: '了解风险', primary: true, onClick: () => store.set({ phase: 'confirm-breaking' }) },
+            { label: '稍后', primary: false, onClick: () => store.set({ phase: 'idle' }) },
+          ]
+        } else {
+          title = '发现新版本:' + (state.current || '?') + ' → ' + (state.latest || '?') + (state.prerelease ? '(预发布版)' : '')
+          buttons = [
+            { label: '立即更新', primary: true, onClick: () => { doInstall().catch(() => {}) } },
+            { label: '稍后', primary: false, onClick: () => store.set({ phase: 'idle' }) },
+          ]
+        }
+      } else if (state.phase === 'confirm-breaking') {
+        title = '⚠️ 确认更新 ' + (state.current || '?') + ' → ' + (state.latest || '?') + '?'
+        detail = state.breakingReason === 'release-notes'
+          ? '官方发布说明包含破坏性变更提示(breaking / incompatible / 迁移 / 移除等)。更新后 DSH 可能与现有插件不兼容,建议先阅读发布说明,并确认插件兼容性。'
+          : '版本跨度较大(主版本/次要版本变更)。DSH 官方公告提示未来版本可能不兼容现有插件;更新后可能需要重新安装或调整插件。'
         buttons = [
-          { label: '立即更新', primary: true, onClick: () => { doInstall().catch(() => {}) } },
-          { label: '稍后', primary: false, onClick: () => store.set({ phase: 'idle' }) },
+          { label: '我了解风险,确认更新', primary: true, onClick: () => { doInstall().catch(() => {}) } },
+          { label: '取消', primary: false, onClick: () => store.set({ phase: 'update' }) },
         ]
       } else if (state.phase === 'error') {
         title = state.errorKind === 'no-release'
@@ -125,8 +149,9 @@ return {
         buttons = [{ label: '关闭', primary: false, onClick: () => store.set({ phase: 'idle' }) }]
       }
 
-      return React.createElement('div', { className: 'upd-banner', role: 'alert' },
+      return React.createElement('div', { className: warning ? 'upd-banner upd-banner-warning' : 'upd-banner', role: 'alert' },
         React.createElement('span', { className: 'upd-banner-text' }, title),
+        detail ? React.createElement('div', { className: 'upd-warning-text' }, detail) : null,
         buttons.map((b) => React.createElement('button', {
           key: b.label,
           className: b.primary ? 'upd-btn-primary' : 'upd-btn-ghost',
@@ -137,13 +162,16 @@ return {
 
     function UpdaterTab() {
       const [state, setState] = React.useState(store.state)
+      const [armed, setArmed] = React.useState(false)
       React.useEffect(() => store.subscribe(setState), [])
+      React.useEffect(() => { if (state.phase !== 'update') setArmed(false) }, [state.phase])
       const busy = state.phase === 'checking' || state.phase === 'installing'
       const phaseLabel = {
         idle: '未检查',
         checking: '检查中…',
         'up-to-date': '已是最新',
-        update: '发现更新',
+        update: state.breaking ? '发现更新(破坏性)' : '发现更新',
+        'confirm-breaking': '确认破坏性更新',
         error: '检查失败',
         installing: '安装中…',
         installed: '已安装',
@@ -156,6 +184,11 @@ return {
         ['上次检查', state.checkedAt ? new Date(state.checkedAt).toLocaleString() : '—'],
         ['状态', phaseLabel],
       ]
+      const onInstallClick = () => {
+        if (state.breaking && !armed) { setArmed(true); return }
+        setArmed(false)
+        doInstall().catch(() => {})
+      }
       return React.createElement('div', { className: 'upd-tab' },
         React.createElement('h3', null, '检查更新'),
         React.createElement('div', { className: 'upd-tab-body' },
@@ -164,9 +197,18 @@ return {
             React.createElement('span', null, r[1]),
           )),
         ),
+        (state.phase === 'update' && state.breaking)
+          ? React.createElement('div', { className: 'upd-warning-text' },
+            '⚠️ 该更新被判定为破坏性变更(' + (state.breakingReason === 'release-notes' ? '官方发布说明提示' : '大版本/次要版本变更') + '),可能需要再次确认。',
+          )
+          : null,
         React.createElement('div', { className: 'upd-actions' },
           React.createElement('button', { className: 'upd-btn-primary', disabled: busy, onClick: () => { doCheck().catch(() => {}) } }, '立即检查'),
-          React.createElement('button', { className: 'upd-btn-primary', disabled: !canInstall, onClick: () => { doInstall().catch(() => {}) } }, '安装更新'),
+          React.createElement('button', {
+            className: state.breaking ? (armed ? 'upd-btn-danger' : 'upd-btn-warning') : 'upd-btn-primary',
+            disabled: !canInstall,
+            onClick: onInstallClick,
+          }, state.breaking && armed ? '再次确认更新(危险)' : '安装更新'),
         ),
         (state.phase === 'error' || state.phase === 'install-error')
           ? React.createElement('div', { className: 'upd-error' },
