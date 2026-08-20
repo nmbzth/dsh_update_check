@@ -1,6 +1,6 @@
-# dsh_auto_update
+# dsh_update_check
 
-> dsh_auto_update 是一个 dsh 插件,能自动检查 dsharness 官方上游仓库比对差异并提示更新。
+> dsh_update_check 是一个 dsh 插件,能自动检查 dsharness 官方上游仓库比对差异并提示更新。
 >
 > A dynamic Cordis plugin for DeepSeek Harness: auto-checks the official GitHub repo for new releases on startup with a top banner, plus a manual check/install page under Settings → Plugins.
 
