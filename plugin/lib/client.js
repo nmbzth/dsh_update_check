@@ -76,7 +76,8 @@ window.__ModuleLoader__.load({
 				breaking: false, breakingReason: null, breakingSignals: [], prerelease: false,
 				localUnreadable: false, checkedAt: null, errorKind: null, message: null,
 				dismissedLatest: null, bannerVisible: true,
-				installProgress: 0, installStage: "", installFiles: []
+				installProgress: 0, installStage: "", installFiles: [],
+				installArmed: false
 			};
 			const listeners = new Set();
 			return {
@@ -182,7 +183,7 @@ window.__ModuleLoader__.load({
 			}
 
 			async function doInstall() {
-				store.set({ phase: "installing", installProgress: 0, installStage: "正在启动安装…", installFiles: [] });
+				store.set({ phase: "installing", installProgress: 0, installStage: "正在启动安装…", installFiles: [], installArmed: false });
 				try {
 					const res = await apiCall(API_INSTALL, "POST");
 					if (!res || !res.ok) {
@@ -323,9 +324,10 @@ window.__ModuleLoader__.load({
 
 			function UpdaterTab() {
 				const [state, setState] = react.useState(store.getState());
-				const [armed, setArmed] = react.useState(false);
 				react.useEffect(() => store.subscribe(setState), []);
-				react.useEffect(() => { if (state.phase !== "update") setArmed(false); }, [state.phase]);
+				// 二次确认状态放 store(与横幅一致):组件重挂载/重复渲染也不会丢失,
+				// 否则会出现「黄色按钮点了没反应、永远无法触发安装」。
+				react.useEffect(() => { if (state.phase !== "update") store.set({ installArmed: false }); }, [state.phase]);
 				const busy = state.phase === "checking" || state.phase === "installing";
 				const phaseLabel = {
 					idle: "未检查", checking: "检查中…", "up-to-date": "已是最新",
@@ -342,8 +344,8 @@ window.__ModuleLoader__.load({
 					["状态", phaseLabel, installed ? { color: "#2ecc71", fontWeight: 600 } : null]
 				];
 				const onInstallClick = () => {
-					if (state.breaking && !armed) { setArmed(true); return; }
-					setArmed(false);
+					if (state.breaking && !state.installArmed) { store.set({ installArmed: true }); return; }
+					store.set({ installArmed: false });
 					doInstall().catch(() => {});
 				};
 				return react.createElement("div", { style: STYLE.tab },
@@ -362,10 +364,10 @@ window.__ModuleLoader__.load({
 					react.createElement("div", { style: STYLE.actions },
 						react.createElement("button", { style: Object.assign({}, STYLE.actionBtn, STYLE.btnPrimary), disabled: busy, onClick: () => { doCheck("manual").catch(() => {}); } }, "立即检查"),
 						react.createElement("button", {
-							style: Object.assign({}, STYLE.actionBtn, state.breaking ? (armed ? STYLE.btnDanger : STYLE.btnWarning) : STYLE.btnPrimary),
+							style: Object.assign({}, STYLE.actionBtn, state.breaking ? (state.installArmed ? STYLE.btnDanger : STYLE.btnWarning) : STYLE.btnPrimary, !canInstall ? { opacity: 0.5, cursor: "not-allowed" } : null),
 							disabled: !canInstall,
 							onClick: onInstallClick
-						}, state.breaking && armed ? "再次确认更新(危险)" : "安装更新")
+						}, state.breaking && state.installArmed ? "再次确认更新(危险)" : "安装更新")
 					),
 					["installing", "installed", "install-error"].indexOf(state.phase) >= 0 ? renderProgress(state) : null,
 					installed

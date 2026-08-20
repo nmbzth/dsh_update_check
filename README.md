@@ -84,7 +84,7 @@ The plugin is distributed as the npm package `dsh-update-check` (`plugin/` direc
 ## Development & contribution
 
 - Plugin source: `plugin/` directory = the npm package `dsh-update-check` (`lib/index.js` Host + `lib/client.js` browser bundle).
-- Local validation: `node scripts/check-src.js` (52 syntax + contract checks; CI runs the same).
+- Local validation: `node scripts/check-src.js` (55 syntax + contract checks; CI runs the same).
 - Issues and PRs are welcome.
 
 ## License

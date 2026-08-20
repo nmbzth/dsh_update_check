@@ -5,6 +5,7 @@
 - **调整(设置图标)**:设置区入口标签改为「↑ 检查更新」(DSH 设置外壳的导航图标由内置 `navIcon(id)` 映射决定,自定义 id 只能显示齿轮,因此把向上箭头放进入口标签与页面标题)。
 - **调整(安装执行器)**:Windows 优先用 **PowerShell** 执行 `npm install -g @deepseek-ai/dsh@latest`(单引号包路径,避免引号转义),失败回退 `cmd.exe` / `sh`。
 - **修复(设置界面无法真正更新)**:安装命令从 `@latest` 改为安装 **check 检测到的具体版本**(`lastCheck` + `npmVersionFromTag`)。原因:GitHub 检测到 `dsh-v0.1.0-rc.8` 时,npm 的 `latest` 标签可能仍是 `0.1.0-rc.7`(rc.8 挂在 `next` 标签),`@latest` 会「安装成功」但版本不变。现在设置页点「安装更新」会真正安装到检测到的 rc.8。
+- **修复(设置页安装按钮无反应)**:二次确认状态 `armed` 从组件局部 state 提升到共享 store(`installArmed`),与横幅的两步确认一致——组件重挂载/重复渲染时不再丢失确认状态,黄色「安装更新」→ 红色「再次确认更新(危险)」→ 第二次点击必定触发安装;同时给禁用按钮加半透明/`not-allowed` 视觉反馈,便于区分「不能装」与「需要二次确认」。
 - **新增(绿色完成提示)**:安装成功后顶部横幅改为**绿色弹窗**(✅ +「更新完成,等待手动重启」),设置页「状态」行与新增提示文字均为**绿色**。
 - **文档(README 国际化)**:仓库主页 README 改为英文,新建 `README.zh-CN.md` 中文版,主页第一行放置中文 README 超链接。
 - 说明:v1.6.0 之前未发布到仓库的 v1.5.0 变更(设置页排最后、安装失败修复、稍后不再重复弹窗、手动检查不弹横幅、安装进度可视化)全部包含在本版本。
@@ -19,7 +20,7 @@
 - **修复(稍后不清除)**:client 的 store 与自动检查改为模块级单例(跨多次 apply 共享),并记录 `dismissedLatest`——点「稍后」后,同一版本的风险横幅**永久忽略**(设置页手动「立即检查」也不会重新弹出);只有出现新版本时才再次提醒。
 - **修复(设置页检查弹横幅)**:设置页「立即检查」新增 `bannerVisible` 开关,手动检查只更新设置页状态,**不再弹顶部横幅**(不再闪现「正在检查更新…」或已忽略的风险信号);横幅仅用于自动检查与横幅内重试/安装。
 - **新增(安装进度可视化)**:安装更新改为**后台任务 + 状态轮询**(`POST /upd-check/api/install` 立即返回,`GET /upd-check/api/install/status` 轮询进度);设置页与横幅显示**右侧带百分比的进度条**,进度条下方是**文件变动窗口**,实时展示 npm 的 add/remove/change/reify 等输出(失败时展示错误与手动修复提示)。
-- CI 断言同步新增 23 项(host npm 解析、缓存重定向、install 状态路由、后台任务、loglevel=info、PowerShell 执行、lastCheck 具体版本;client order 9999、dismissedLatest、手动检查不重置忽略状态、bannerVisible、manual 来源、状态轮询、进度、文件变动窗口、绿色完成提示、箭头图标)。
+- CI 断言同步新增 24 项(host npm 解析、缓存重定向、install 状态路由、后台任务、loglevel=info、PowerShell 执行、lastCheck 具体版本;client order 9999、dismissedLatest、手动检查不重置忽略状态、bannerVisible、manual 来源、状态轮询、进度、文件变动窗口、绿色完成提示、箭头图标、installArmed)。
 
 ## v1.4.0 — 修复静态路由注册 + 检查更新提升为独立设置页
 
