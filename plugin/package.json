@@ -1,0 +1,31 @@
+{
+  "name": "dsh-update-check",
+  "description": "DSH 静态插件:打开即自动检查官方 deepseek-harness 仓库更新,顶部横幅 + 设置-插件「检查更新」页,破坏性更新黄色预警与二次确认。",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "updater"
+  ]
+}

@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.0 — 静态插件化(持久加载)
+
+- **新增**:`plugin/` 目录 = npm 包 `dsh-update-check`(静态形态,推荐分发):
+  - Host(`plugin/lib/index.js`):宿主 composition 插件(ESM `export { apply }`),无动态插件 `harness`,改用宿主 `webServer` 暴露同源 HTTP 接口(`GET /upd-check/api/check`、`POST /upd-check/api/install`);
+  - Client(`plugin/lib/client.js`):ModuleLoader 格式浏览器 bundle,`exports["./client"]` + `package.json dsh.client` 声明,由 client-modules 自动扫描打包;UI 与动态版一致(内联样式),RPC 走同源 fetch;
+  - 安装:拷贝到 profile `node_modules` + `cordis.patch.yml` 插入 `upd-check` 行 + 重启 DSH → **重启/更新 DSH 后无需重装**。
+- **保留**:`src/` 动态版(开发/调试形态)。
+- CI 校验扩展至 45 项(含静态包语法、路由、bundle、注入声明)。
+
 ## v0.5.1(pkg-6)— 修复破坏性检测误报
 
 - **修复**:官方 rc.8 发布说明含「数据结构不兼容 / storage format is incompatible」被误判为破坏性更新(实为 SQLite 存储格式内部变更)。关键词检测收紧为**高置信度措辞**:`breaking change`、`breaks compatibility`、`not backward compatible`、`backward-incompatible`、`BC break`、`破坏性更新/变更`、`破坏…兼容`、`不向后兼容`;**移除**宽泛的 `incompatible / migration / removed / deprecated / 不兼容 / 迁移 / 移除` 等正常变更描述词。语义版本判定(major / 0.x minor)不受影响。
