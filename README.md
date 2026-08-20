@@ -74,7 +74,7 @@
 
 - `src/host.js` / `src/client.js` 即插件源码(与 `cordis_define` 的 `code.host` / `code.client` 一一对应),修改后重新定义即可(动态插件支持 immutable 包版本演进)。
 - 本地校验:`node scripts/check-src.js`(语法 + 契约检查,CI 同样执行)。
-- 欢迎提交 Issue / PR。
+- 欢迎提交 PR。
 
 ## License
 
