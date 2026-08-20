@@ -284,6 +284,18 @@ function apply(ctx) {
     throw new Error('no-release')
   }
 
+  async function resolveNpmPath() {
+    if (!subprocess) return null
+    const candidates = process.platform === 'win32' ? ['npm.cmd', 'npm'] : ['npm']
+    for (const name of candidates) {
+      try {
+        const resolved = await subprocess.resolveExecutable(name)
+        if (resolved) return resolved
+      } catch (e) { /* try next */ }
+    }
+    return null
+  }
+
   async function runShell(cmdline) {
     if (!subprocess) throw new Error('subprocess-unavailable')
     const cwd = await baseCwd()
@@ -371,14 +383,179 @@ function apply(ctx) {
     }
   }
 
-  async function handleInstall() {
+  // ===== 安装更新(后台任务 + 状态轮询,支持实时进度条与文件变动窗口) =====
+  let installJob = null
+
+  function pushInstallLog(job, line) {
+    job.lines.push(line)
+    if (job.lines.length > 300) job.lines.splice(0, job.lines.length - 300)
+    // 只把与文件变动/错误相关的行放进变动窗口
+    if (/added|removed|changed|reify|fetch|error|warn|EPERM|EACCES|ENOENT|not writable|permission|@deepseek-ai/i.test(line)) {
+      job.files.push(line)
+      if (job.files.length > 120) job.files.splice(0, job.files.length - 120)
+    }
+  }
+
+  function onInstallOutput(job, text) {
+    const lines = String(text || '').split(/\r?\n/)
+    for (const raw of lines) {
+      const line = raw.trim()
+      if (!line) continue
+      pushInstallLog(job, line)
+      job.progress = Math.min(90, job.progress + 1)
+      if (/npm http fetch|npm http cache|silly fetch/i.test(line)) {
+        job.stage = '正在下载依赖…'
+      } else if (/reify|added \d+ package|removed \d+ package|changed \d+ package|npm info reify/i.test(line)) {
+        job.stage = '正在写入/更新文件…'
+      } else if (/^npm error|EPERM|EACCES|ENOENT|not writable|permission/i.test(line)) {
+        job.stage = '安装出错'
+      } else {
+        job.stage = '正在安装…'
+      }
+    }
+  }
+
+  async function startInstallJob() {
     try {
-      const r = await runShell('npm install -g @deepseek-ai/dsh@latest')
-      const out = (r.stdout + '\n' + r.stderr).trim().slice(-2000)
-      if (r.exitCode === 0) return { ok: true, message: '安装成功,重启 DSH 后生效' }
-      return { ok: false, message: out || ('安装失败(退出码 ' + r.exitCode + ')') }
+      if (installJob && installJob.running) {
+        return { ok: false, message: '已有安装任务正在执行,请稍候' }
+      }
+      // 1) 像 node 一样用 resolveExecutable 找 npm 真实路径:
+      //    子进程 provider 可能清洗 PATH,裸 `npm` 会报「不是内部或外部命令」。
+      const npm = await resolveNpmPath()
+      const npmCmd = npm ? '"' + npm + '"' : 'npm'
+      let cacheFlag = ''
+      // 2) 默认 npm 缓存写 %LOCALAPPDATA%\npm-cache,在 DSH 文件沙箱下会 EPERM;
+      //    把缓存指到沙箱可写的 workspace/profile 目录,避免「更新失败」。
+      try {
+        const cwd = await baseCwd()
+        if (cwd && cwd !== '.') {
+          cacheFlag = ' --cache "' + cwd.replace(/\\/g, '/') + '/.dsh-update-cache"'
+        }
+      } catch (e) { /* 拿不到 cwd 时用 npm 默认缓存 */ }
+      // --loglevel=info 让 npm 输出 add/remove/change/reify 等文件变动信息
+      const cmdline = npmCmd + ' install -g @deepseek-ai/dsh@latest' + cacheFlag + ' --no-audit --no-fund --loglevel=info'
+      // PowerShell 版命令(Windows 优先):用单引号包路径,避免外层引号转义问题
+      let cacheDir = ''
+      try {
+        const cwd = await baseCwd()
+        if (cwd && cwd !== '.') cacheDir = cwd.replace(/\\/g, '/') + '/.dsh-update-cache'
+      } catch (e) { /* 拿不到 cwd 时用 npm 默认缓存 */ }
+      const psNpm = npm ? "'" + npm.replace(/'/g, "''") + "'" : 'npm'
+      const psCmd = '& ' + psNpm + ' install -g @deepseek-ai/dsh@latest' +
+        (cacheDir ? " --cache '" + cacheDir.replace(/'/g, "''") + "'" : '') +
+        ' --no-audit --no-fund --loglevel=info'
+      const job = {
+        running: true, progress: 5, stage: '正在启动 npm…', files: [], lines: [],
+        message: '', exitCode: null, lastOut: '', lastErr: '', spawnError: null,
+      }
+      installJob = job
+      spawnInstall(job, cmdline, psCmd).catch((e) => {
+        job.running = false
+        job.progress = 100
+        job.stage = '安装失败'
+        job.message = e && e.message ? String(e.message) : '安装失败'
+        pushInstallLog(job, '安装失败:' + job.message)
+      })
+      return { ok: true, job: 'install' }
     } catch (e) {
-      return { ok: false, message: e && e.message ? String(e.message) : '安装失败' }
+      return { ok: false, message: e && e.message ? String(e.message) : '启动安装失败' }
+    }
+  }
+
+  async function spawnInstall(job, cmdline, psCmd) {
+    if (!subprocess) throw new Error('subprocess-unavailable')
+    const cwd = await baseCwd()
+    const shells = []
+    // Windows 优先用 PowerShell 执行(用户建议:更新走 powershell 安装),
+    // 失败再回退 cmd.exe / sh。
+    if (process.platform === 'win32') {
+      shells.push({ argv: ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psCmd] })
+    }
+    shells.push({ argv: ['cmd.exe', '/d', '/s', '/c', cmdline] })
+    shells.push({ argv: ['sh', '-c', cmdline] })
+    let handle = null
+    let lastErr = null
+    for (const shell of shells) {
+      try {
+        handle = subprocess.spawn({
+          argv: shell.argv,
+          cwd,
+          stdio: {
+            stdin: 'ignore',
+            stdout: { maxBytes: 524288, spill: { maxBytes: 4194304 } },
+            stderr: { maxBytes: 262144, spill: { maxBytes: 2097152 } },
+          },
+          graceMs: 3000,
+        })
+        break
+      } catch (e) { lastErr = e }
+    }
+    if (!handle) throw lastErr || new Error('no-shell')
+
+    // 增量读取 stdout/stderr(字符串 diff,避免字节偏移在多字节字符处错位)
+    const drain = () => {
+      try {
+        if (handle.collected && handle.collected.stdout) {
+          const full = handle.collected.stdout.readFrom(0).text || ''
+          if (full !== job.lastOut) {
+            const chunk = full.startsWith(job.lastOut) ? full.slice(job.lastOut.length) : full
+            job.lastOut = full
+            if (chunk) onInstallOutput(job, chunk)
+          }
+        }
+        if (handle.collected && handle.collected.stderr) {
+          const full = handle.collected.stderr.readFrom(0).text || ''
+          if (full !== job.lastErr) {
+            const chunk = full.startsWith(job.lastErr) ? full.slice(job.lastErr.length) : full
+            job.lastErr = full
+            if (chunk) onInstallOutput(job, chunk)
+          }
+        }
+      } catch (e) { /* 读取失败忽略,等下一次轮询 */ }
+    }
+
+    const poll = setInterval(drain, 250)
+    try {
+      const outcome = await handle.done
+      clearInterval(poll)
+      drain()
+      job.exitCode = outcome.exitCode
+      job.running = false
+      if (outcome.exitCode === 0) {
+        job.progress = 100
+        job.stage = '安装完成'
+        job.message = '安装成功,重启 DSH 后生效'
+      } else {
+        job.progress = 100
+        job.stage = '安装失败'
+        const tail = job.lines.slice(-8).join('\n')
+        job.message = tail || ('安装失败(退出码 ' + outcome.exitCode + ')')
+        if (/EPERM|EACCES|permission|not writable/i.test(tail)) {
+          job.message += '\n提示:写入 npm 全局目录或缓存被拒绝(权限/沙箱限制)。请关闭 DSH 后,在终端手动执行:npm install -g @deepseek-ai/dsh@latest'
+        }
+      }
+    } catch (e) {
+      clearInterval(poll)
+      job.running = false
+      job.progress = 100
+      job.stage = '安装失败'
+      job.message = e && e.message ? String(e.message) : '安装失败'
+    }
+  }
+
+  function handleInstallStatus() {
+    if (!installJob) {
+      return { ok: true, running: false, progress: 0, stage: 'idle', files: [], message: '' }
+    }
+    return {
+      ok: true,
+      running: installJob.running,
+      progress: installJob.progress,
+      stage: installJob.stage,
+      files: installJob.files.slice(-80),
+      message: installJob.message || '',
+      exitCode: installJob.exitCode,
     }
   }
 
@@ -403,7 +580,16 @@ function apply(ctx) {
       path: '/upd-check/api/install',
       handler: async (req, res) => {
         if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'method' }); return }
-        const result = await handleInstall()
+        const result = await startInstallJob()
+        sendJson(res, 200, result)
+      },
+    }))
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/upd-check/api/install/status',
+      handler: async (req, res) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, { ok: false, error: 'method' }); return }
+        const result = handleInstallStatus()
         sendJson(res, 200, result)
       },
     }))

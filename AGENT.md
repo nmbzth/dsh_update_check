@@ -15,7 +15,7 @@
 
 - [ ] `cordis_define` 成功返回 pluginId 与 packageId;
 - [ ] `cordis_run` 进入 `awaiting-approval` 或 `starting`,并最终 `running`(可 `cordis_inspect_self` 确认 Host handlers 含 `check`/`install`,Client 无渲染错误);
-- [ ] `slots` 树中 `shell.overlay` 出现 `updcheck.banner`、`settings.plugins.tab` 出现 `check-updates`;
+- [ ] `slots` 树中 `shell.overlay` 出现 `updcheck.banner`、`settings.section` 出现 `upd-check`;
 - [ ] 告知用户:刷新页面后 3 秒应看到顶部检查横幅;设置 → 插件 应出现「检查更新」页签。
 
 ## 卸载 / 重启说明

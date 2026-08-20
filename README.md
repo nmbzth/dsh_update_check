@@ -1,31 +1,34 @@
+[**中文 README**](README.zh-CN.md) · [English](README.md)
+
 # dsh_update_check
 
-> dsh_update_check 是一个 dsh 插件，能自动检查 dsharness 官方上游仓库比对差异并提示更新。
->
-> A dynamic Cordis plugin for DeepSeek Harness: auto-checks the official GitHub repo for new releases on startup with a top banner, plus a manual check/install page under Settings → Plugins.
+> dsh_update_check is a DSH plugin that automatically compares the official upstream DeepSeek Harness repository and prompts you when an update is available.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 功能特性
+## Features
 
-1. **打开即检**：页面加载 3 秒后自动向官方仓库检查一次（`connection/reset` 时补触发）。
-2. **基于官方 GitHub**：按序尝试 `releases/latest` API → `tags` API → releases 页面 HTML，10 秒超时，`dsh-v*` 前缀的 tag 也能正确解析（semver 风格比较，含 rc/beta 预发布）。
-3. **网络不佳有提示**：连不上 GitHub 时，顶部横幅显示「无法连接 GitHub，检查失败」+ 「重试 / 关闭」。
-4. **发现更新常驻提醒**：「发现新版本：当前 X → 最新 Y」+ 「立即更新 / 稍后」，**无自动消失计时器**，只有点击才关闭。
-5. **独立设置页手动操作**：设置区新增**独立的「检查更新」页**（与「通用设置 / 模型 / 插件」同级），展示 当前版本 / 最新版本 / 上次检查 / 状态，可「立即检查」「安装更新」。
-6. **破坏性更新预警（重要）**：DSH 官方公告未来将有破坏性更新，可能与旧插件不兼容。插件双重信号检测破坏性更新——① 语义版本（major 变化，或 0.x 阶段 minor 变化）；② 官方发布说明关键词，**分级判定**：
-   - **强信号**（breaking change / 破坏性更新 / 破坏…兼容 等）→ 黄色高亮 + ⚠️「检测到破坏性更新」；
-   - **弱信号**（不兼容 / incompatible / 迁移 / 移除 / deprecated 等）→ 同样黄色高亮 + ⚠️「检测到**可能**破坏性更新」，二次确认页会**列出命中的关键词与原文片段**（如「…数据结构不兼容…」），由你核实是否真的影响插件；
-   - 两种信号都必须经过「了解风险 → 我了解风险，确认更新」**二次确认**才会执行安装。
+1. **Check on startup** — checks the official repository 3 seconds after the page loads (and again on `connection/reset`).
+2. **Based on the official GitHub repo** — tries `releases/latest` API → `tags` API → releases page HTML in order, with a 10 s timeout; tags with a `dsh-v*` prefix parse correctly (semver-style comparison, including rc/beta prereleases).
+3. **Network failure notice** — when GitHub is unreachable, the top banner shows "Cannot reach GitHub, check failed" with **Retry / Close**.
+4. **Persistent update reminder** — "New version: current X → latest Y" with **Update now / Later**, **no auto-dismiss timer** (only clicking closes it). After clicking **Later**, the same version never pops up again (not even from the settings page's manual "Check now"); it only reappears when a new version (`latest` changes) is published.
+5. **Dedicated settings page** — a standalone **"↑ Check for updates"** page in Settings (same level as General / Models / Plugins, **listed last**), showing current version / latest version / last check / status, with "Check now" and "Install update" buttons.
+6. **Install progress visualization** — after clicking "Install update", a **progress bar with percentage on the right** is shown, with a **file-change window** below it streaming npm's add / remove / change / reify output in real time. The install runs as a background job polled by the client; on failure the window shows the concrete error plus a manual fix hint.
+7. **Breaking-change warning (important)** — DSH has announced future breaking updates that may be incompatible with older plugins. The plugin detects breaking updates with two signals, **graded**:
+   - **Semver** (deterministic): major change, or minor change during 0.x.
+   - **Official release notes**: keyword matching, **graded**:
+     - **Strong signals** (`breaking change`, `破坏性更新`, `破坏…兼容`, etc.) → yellow highlight + ⚠️ "Breaking update detected";
+     - **Weak signals** (`incompatible`, `migration`, `removed`, `deprecated`, `不兼容`, `迁移`, `移除`, etc.) → yellow highlight + ⚠️ "Possibly breaking update", and the confirmation page **lists the matched keywords and the original snippets** for you to verify.
+   - Both signal levels require a **double confirmation** ("Learn the risk" → "I understand the risk, confirm update") before installation runs.
 
-## 安装方式
+## Installation
 
-### 静态插件
+### Static plugin
 
-插件以 npm 包 `dsh-update-check` 提供（`plugin/` 目录），挂进宿主 composition，随 DSH 启动自动加载：
+The plugin is distributed as the npm package `dsh-update-check` (`plugin/` directory) and is mounted into the host composition, loading automatically when DSH starts:
 
-1. **安装包**：把 `plugin/` 目录放入 profile 的 `node_modules`（Windows 默认 `C:\Users\<你>\.dsh\profiles\<profile>\node_modules\dsh-update-check\`，含 `package.json` + `lib/`）；
-2. **挂载**：编辑该 profile 的 `cordis.patch.yml`，追加：
+1. **Install the package**: copy the `plugin/` directory into your profile's `node_modules` (Windows default: `C:\Users\<you>\.dsh\profiles\<profile>\node_modules\dsh-update-check\`, containing `package.json` + `lib/`);
+2. **Mount it**: edit that profile's `cordis.patch.yml` and append:
 
    ```yaml
    - insert:
@@ -33,52 +36,55 @@
          name: 'dsh-update-check'
    ```
 
-3. **重启 DSH**：生效后无需任何手动加载，插件常驻（更新 DSH 后也不用重装）。
+3. **Restart DSH**: it takes effect without any manual loading and stays resident (no reinstall needed after DSH updates).
 
-> 说明：Host 插件通过宿主 `webServer` 暴露 `GET /upd-check/api/check`、`POST /upd-check/api/install` 两个同源 HTTP 接口（Host 以 `inject: ['webServer']` 声明硬依赖，等服务就绪后再注册路由）；浏览器端 client bundle（ModuleLoader 格式）经 `exports["./client"]` + `package.json dsh.client` 声明被 dsh 的 client-modules 自动扫描打包，挂载 `shell.overlay` 横幅，并在设置区注册**独立的「检查更新」页**（`settings.section`，与「通用设置 / 模型 / 插件」同级）。
+> Note: the Host exposes `GET /upd-check/api/check` and `POST /upd-check/api/install` (plus `GET /upd-check/api/install/status` for polling) through the host `webServer` (the Host declares `inject: ['webServer']` as a hard dependency so routes register after the service is ready). The browser client bundle (ModuleLoader format) is auto-bundled by dsh's client-modules via `exports["./client"]` + the `dsh.client` field in `package.json`; it mounts the `shell.overlay` banner and registers the **dedicated "Check for updates" page** (`settings.section`, same level as General / Models / Plugins).
 
-## 工作原理
+## How it works
 
-| 半区 | 职责 |
+| Side | Responsibility |
 | --- | --- |
-| Host（`plugin/lib/index.js`） | 拉取 GitHub 官方 API、读取本地已装版本（`npm ls -g` → `npm root -g` + 读 package.json）、版本比较、破坏性更新判定、执行 `npm install -g @deepseek-ai/dsh@latest` |
-| Client（`plugin/lib/client.js`） | `shell.overlay` 顶部横幅 + 设置区独立「检查更新」页（`settings.section`） |
-| 通信 | `webServer` HTTP 路由 + 同源 fetch |
+| Host (`plugin/lib/index.js`) | Fetches GitHub official APIs, reads the locally installed version (`npm ls -g` → `npm root -g` + read package.json), compares versions, detects breaking changes, and runs `npm install -g @deepseek-ai/dsh@latest` (resolves the real `npm.cmd`/`npm` path and redirects the npm cache to a sandbox-writable directory to avoid permission/sandbox install failures). The install is a **background job**: `POST /upd-check/api/install` starts it, `GET /upd-check/api/install/status` polls progress/stage/file changes. On Windows it prefers running through **PowerShell** (falling back to `cmd.exe`/`sh`). |
+| Client (`plugin/lib/client.js`) | `shell.overlay` top banner + the dedicated Settings page (`settings.section`); during install it shows a **progress bar with percentage on the right** + a **file-change window**; after success it shows a **green popup asking to restart** and green status text. |
+| Communication | `webServer` HTTP routes + same-origin fetch |
 
-**网络传输三级容错**：
+**Three-level network fallback**:
 
-1. `web.fetch`（若部署挂载了 fetch provider）；
-2. `subprocess` 跑 `node -`（stdin 喂脚本）标准 `fetch`（自动跟随重定向）；
-3. 前两者失败（典型场景：**hosts 被第三方工具劫持**，如 Steamcommunity302 把 `github.com` 指向 `127.0.0.1` 并返回自签证书）→ 脚本内用 `dns.resolve4` 取真实 IP，以 `servername`/`Host` 头直连，手动跟随重定向、逐个 IP 重试。
+1. `web.fetch` (when a fetch provider is mounted);
+2. `subprocess` running `node -` (script fed via stdin) with the standard `fetch` (auto-follows redirects);
+3. When the first two fail (typical case: **hosts hijacked by third-party tools** such as Steamcommunity302 pointing `github.com` at `127.0.0.1` with a self-signed cert) → the script resolves real IPs via `dns.resolve4`, connects directly with `servername`/`Host` headers, manually follows redirects, and retries IP by IP.
 
-## 兼容性与已知限制
+## Compatibility and known limitations
 
-| 项目 | 状态 | 说明 |
+| Item | Status | Notes |
 | --- | --- | --- |
-| Windows / macOS / Linux | ✅ | shell 双回退（`cmd.exe` → `sh`），node 解析双回退（`node` → `node.exe`）；无硬编码路径 |
-| npm 全局安装的 DSH | ✅ | 本地版本通过 `npm ls -g @deepseek-ai/dsh` / `npm root -g` 读取 |
-| pnpm / bun / git clone 安装 | ⚠️ | 本地版本可能读不到，横幅显示「最新版本 X（无法读取本地版本）」；远端检查不受影响 |
-| hosts 劫持（Steamcommunity302 等） | ✅ | 内置 DNS 直连绕过 |
-| 未挂载 fetch provider 的部署 | ✅ | node 直连通道兜底 |
-| GitHub 匿名 API 限流 | ⚠️ | 60 次/小时/IP；每次页面加载自动检查 1 次，手动检查按需触发，一般足够 |
-| 安装更新 | ⚠️ | 执行 `npm install -g @deepseek-ai/dsh@latest`，仅对 npm 管理安装生效；非 npm 安装请手动升级 |
-| DSH 版本适配 | ⚠️ | 插槽名（`shell.overlay`、`settings.plugins.tab`）以 0.1.0-rc.x 实测为准；未来版本若插槽树变化，UI 不挂载但不会崩溃，Host 检查功能不受影响 |
-| 破坏性更新判定 | ✅ | semver 判定确定性可靠；发布说明关键词分级（强信号直接判破坏性；弱信号黄色预警并展示命中关键词与原文片段供核实）；任一命中即黄色预警 + 二次确认 |
-| 静态插件 | ✅ | 随 DSH 启动自动加载，重启/更新 DSH 后无需重装；Host 无 `harness`，走 `webServer` HTTP 接口（同源，仅本机监听） |
+| Windows / macOS / Linux | ✅ | Shell fallback chain: Windows uses **PowerShell → cmd.exe** (and `sh` on POSIX); node resolution tries `node` → `node.exe`; no hard-coded paths |
+| DSH installed via npm globally | ✅ | Local version read via `npm ls -g @deepseek-ai/dsh` / `npm root -g` |
+| pnpm / bun / git clone installs | ⚠️ | Local version may be unreadable; banner shows "Latest version X (cannot read local version)"; remote check is unaffected |
+| hosts hijacking (Steamcommunity302 etc.) | ✅ | Built-in DNS direct-connect bypass |
+| Deployments without a fetch provider | ✅ | Node direct-connect fallback |
+| GitHub anonymous API rate limit | ⚠️ | 60 req/h/IP; one auto-check per page load plus on-demand manual checks are usually enough |
+| Install update | ⚠️ | Runs `npm install -g @deepseek-ai/dsh@latest` (npm path resolved + cache redirected to a sandbox-writable directory); only works for npm-managed installs; if the global directory itself is not writable, a manual-run hint is shown |
+| DSH version adaptation | ⚠️ | Slot names (`shell.overlay`, `settings.section`) verified against 0.1.0-rc.x; if the slot tree changes in future versions the UI simply won't mount (no crash), and Host checks keep working |
+| Breaking-change detection | ✅ | Semver detection is deterministic; release-note keywords are graded (strong → breaking; weak → yellow warning with matched keywords and snippets); any hit triggers yellow warning + double confirmation |
+| Static plugin | ✅ | Auto-loads with DSH; no reinstall after DSH restart/update; Host has no `harness`, uses same-origin `webServer` HTTP (localhost only) |
 
-## 疑难解答
+## Troubleshooting
 
-- **一直显示「无法连接 GitHub」**：先检查 hosts（`C:\Windows\System32\drivers\etc\hosts`）是否有 `github.com` / `api.github.com` → `127.0.0.1` 的劫持行（常见于 Steamcommunity302 等加速工具）；有则删除这些行（需管理员），或直接依赖插件内置的 DNS 绕过。也可尝试点「重试」。
-- **插件未生效**：确认 `node_modules/dsh-update-check` 存在、`cordis.patch.yml` 已插入行、**重启 DSH**；检查 `GET /upd-check/api/check` 是否返回 JSON。
-- **设置区没有「检查更新」页**：确认 client bundle 被扫描（重启后刷新页面）；「检查更新」现在位于设置区的**顶级页**（与通用设置/模型/插件同级），不再在「插件」页内。
-- **「无法读取本地版本」**：DSH 不是通过 npm 全局安装的；远端版本仍会正常显示。
-- **黄色预警误报/漏报**：破坏性判定以语义版本为主（确定性），发布说明关键词为辅；弱信号只提示"可能"并展示原文片段，由你核实；若官方发布说明措辞不含关键词，可能漏报 release-notes 信号，但版本信号仍会兜底。
+- **"Cannot reach GitHub" all the time**: check `C:\Windows\System32\drivers\etc\hosts` for hijack lines mapping `github.com` / `api.github.com` → `127.0.0.1` (common with Steamcommunity302 and similar tools); delete those lines (admin rights) or rely on the built-in DNS bypass, then click **Retry**.
+- **Plugin not working**: confirm `node_modules/dsh-update-check` exists, the `cordis.patch.yml` line is present, and **restart DSH**; check `GET /upd-check/api/check` returns JSON.
+- **No "Check for updates" page in Settings**: make sure the client bundle was scanned (restart + refresh); the page is now a **top-level Settings page** (same level as General/Models/Plugins), not inside the Plugins tab.
+- **"Cannot read local version"**: DSH is not installed as a global npm package; the remote version still displays normally.
+- **Install fails after clicking "Update"**: the plugin resolves the real npm path and redirects the npm cache to a sandbox-writable directory; if it still fails, the failure window shows the concrete reason. On EPERM/EACCES/permission errors, the DSH file sandbox likely cannot write the npm global directory (`%APPDATA%\npm`); close DSH and run `npm install -g @deepseek-ai/dsh@latest` manually in a terminal.
+- **The banner reappears after "Later"**: since v1.5.0 the client remembers the ignored version; the same version won't pop up again after connection resets, page reloads, or even settings-page manual checks. To act on the update later, click "Install update" on the Settings page; the banner only reappears when a new version (`latest`) is published.
+- **Settings "Check now" pops the top banner**: since v1.5.0 manual checks only update the Settings page state and no longer pop the top banner (neither "Checking for updates…" nor the ignored risk signal); the top banner is reserved for auto-checks and banner actions (Retry / Update now).
+- **Yellow warning false positives/negatives**: breaking detection primarily relies on semver (deterministic); release-note keywords are a best-effort supplement. Weak signals only say "possibly" and show the original snippets for verification; if the official notes don't contain the keywords, a release-notes signal may be missed, but the version signal still covers it.
 
-## 开发与贡献
+## Development & contribution
 
-- 插件本体：`plugin/` 目录 = npm 包 `dsh-update-check`（`lib/index.js` Host + `lib/client.js` 浏览器 bundle）。
-- 本地校验：`node scripts/check-src.js`（31 项语法 + 契约检查，CI 同样执行）。
-- 欢迎提交 Issue / PR。
+- Plugin source: `plugin/` directory = the npm package `dsh-update-check` (`lib/index.js` Host + `lib/client.js` browser bundle).
+- Local validation: `node scripts/check-src.js` (52 syntax + contract checks; CI runs the same).
+- Issues and PRs are welcome.
 
 ## License
 
