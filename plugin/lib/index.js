@@ -1,8 +1,11 @@
 // dsh-update-check — 静态 Host 半区(宿主 composition 插件)
-// 与动态版(src/host.js)同一套检查逻辑,但 RPC 改用 webServer HTTP 路由:
+// RPC 改用 webServer HTTP 路由:
 //   GET  /upd-check/api/check    → 检查结果 JSON
 //   POST /upd-check/api/install  → 执行 npm install -g 更新
 // 浏览器客户端(client bundle)通过同源 fetch 调用。
+// inject 声明 webServer 硬依赖:webServer 由 web-app 层提供,可能晚于本插件激活,
+// 声明注入可让 cordis 等服务就绪后再 apply(否则 ctx.get('webServer') 可能为 undefined,路由注册被跳过)。
+export const inject = ['webServer']
 export { apply }
 
 function apply(ctx) {

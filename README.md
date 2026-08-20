@@ -12,7 +12,7 @@
 2. **基于官方 GitHub**：按序尝试 `releases/latest` API → `tags` API → releases 页面 HTML，10 秒超时，`dsh-v*` 前缀的 tag 也能正确解析（semver 风格比较，含 rc/beta 预发布）。
 3. **网络不佳有提示**：连不上 GitHub 时，顶部横幅显示「无法连接 GitHub，检查失败」+ 「重试 / 关闭」。
 4. **发现更新常驻提醒**：「发现新版本：当前 X → 最新 Y」+ 「立即更新 / 稍后」，**无自动消失计时器**，只有点击才关闭。
-5. **设置页手动操作**：设置 → 插件 →「检查更新」页，展示 当前版本 / 最新版本 / 上次检查 / 状态，可「立即检查」「安装更新」。
+5. **独立设置页手动操作**：设置区新增**独立的「检查更新」页**（与「通用设置 / 模型 / 插件」同级），展示 当前版本 / 最新版本 / 上次检查 / 状态，可「立即检查」「安装更新」。
 6. **破坏性更新预警（重要）**：DSH 官方公告未来将有破坏性更新，可能与旧插件不兼容。插件双重信号检测破坏性更新——① 语义版本（major 变化，或 0.x 阶段 minor 变化）；② 官方发布说明关键词，**分级判定**：
    - **强信号**（breaking change / 破坏性更新 / 破坏…兼容 等）→ 黄色高亮 + ⚠️「检测到破坏性更新」；
    - **弱信号**（不兼容 / incompatible / 迁移 / 移除 / deprecated 等）→ 同样黄色高亮 + ⚠️「检测到**可能**破坏性更新」，二次确认页会**列出命中的关键词与原文片段**（如「…数据结构不兼容…」），由你核实是否真的影响插件；
@@ -35,14 +35,14 @@
 
 3. **重启 DSH**：生效后无需任何手动加载，插件常驻（更新 DSH 后也不用重装）。
 
-> 说明：Host 插件通过宿主 `webServer` 暴露 `GET /upd-check/api/check`、`POST /upd-check/api/install` 两个同源 HTTP 接口；浏览器端 client bundle（ModuleLoader 格式）经 `exports["./client"]` + `package.json dsh.client` 声明被 dsh 的 client-modules 自动扫描打包，挂载 `shell.overlay` 横幅与 `settings.plugins.tab`「检查更新」页。
+> 说明：Host 插件通过宿主 `webServer` 暴露 `GET /upd-check/api/check`、`POST /upd-check/api/install` 两个同源 HTTP 接口（Host 以 `inject: ['webServer']` 声明硬依赖，等服务就绪后再注册路由）；浏览器端 client bundle（ModuleLoader 格式）经 `exports["./client"]` + `package.json dsh.client` 声明被 dsh 的 client-modules 自动扫描打包，挂载 `shell.overlay` 横幅，并在设置区注册**独立的「检查更新」页**（`settings.section`，与「通用设置 / 模型 / 插件」同级）。
 
 ## 工作原理
 
 | 半区 | 职责 |
 | --- | --- |
 | Host（`plugin/lib/index.js`） | 拉取 GitHub 官方 API、读取本地已装版本（`npm ls -g` → `npm root -g` + 读 package.json）、版本比较、破坏性更新判定、执行 `npm install -g @deepseek-ai/dsh@latest` |
-| Client（`plugin/lib/client.js`） | `shell.overlay` 顶部横幅 + `settings.plugins.tab`「检查更新」页 |
+| Client（`plugin/lib/client.js`） | `shell.overlay` 顶部横幅 + 设置区独立「检查更新」页（`settings.section`） |
 | 通信 | `webServer` HTTP 路由 + 同源 fetch |
 
 **网络传输三级容错**：
@@ -70,7 +70,7 @@
 
 - **一直显示「无法连接 GitHub」**：先检查 hosts（`C:\Windows\System32\drivers\etc\hosts`）是否有 `github.com` / `api.github.com` → `127.0.0.1` 的劫持行（常见于 Steamcommunity302 等加速工具）；有则删除这些行（需管理员），或直接依赖插件内置的 DNS 绕过。也可尝试点「重试」。
 - **插件未生效**：确认 `node_modules/dsh-update-check` 存在、`cordis.patch.yml` 已插入行、**重启 DSH**；检查 `GET /upd-check/api/check` 是否返回 JSON。
-- **设置页没有「检查更新」页签**：确认 client bundle 被扫描（重启后刷新页面）。
+- **设置区没有「检查更新」页**：确认 client bundle 被扫描（重启后刷新页面）；「检查更新」现在位于设置区的**顶级页**（与通用设置/模型/插件同级），不再在「插件」页内。
 - **「无法读取本地版本」**：DSH 不是通过 npm 全局安装的；远端版本仍会正常显示。
 - **黄色预警误报/漏报**：破坏性判定以语义版本为主（确定性），发布说明关键词为辅；弱信号只提示"可能"并展示原文片段，由你核实；若官方发布说明措辞不含关键词，可能漏报 release-notes 信号，但版本信号仍会兜底。
 

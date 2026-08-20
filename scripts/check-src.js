@@ -27,12 +27,13 @@ check(sPkg.dsh.client.inject && sPkg.dsh.client.inject.includes('@deepseek-ai/ds
 
 // 2) Host 半区
 try {
-  new Function(sHost.replace(/^export\s+/, '').replace(/export \{ apply \}/, 'return { apply }'))
+  new Function(sHost.replace(/^export\s+/gm, ''))
   check(true, '静态 host 语法有效')
 } catch (e) {
   check(false, '静态 host 语法无效: ' + e.message)
 }
 check(/export \{ apply \}/.test(sHost), '静态 host 导出 apply')
+check(sHost.includes("inject = ['webServer']"), '静态 host 注入 webServer 硬依赖')
 check(sHost.includes('deepseek-ai/deepseek-harness'), 'host 指向官方仓库')
 check(sHost.includes('releases/latest') && sHost.includes('/tags'), 'host 含 releases/tags 通道')
 check(sHost.includes('webServer.register'), 'host 注册 webServer 路由')
@@ -56,7 +57,10 @@ try {
 check(/window\.__ModuleLoader__\.load/.test(sClient), '静态 client 为 ModuleLoader bundle')
 check(sClient.includes('exports.inject = ["slots"]') || sClient.includes("exports.inject = ['slots']"), '静态 client 注入 slots')
 check(sClient.includes('/upd-check/api/check'), 'client fetch check API')
-check(sClient.includes('shell.overlay') && sClient.includes('settings.plugins.tab'), 'client 挂载两个插槽')
+check(sClient.includes('shell.overlay'), 'client 挂载 shell.overlay 横幅')
+check(sClient.includes('settings.section'), 'client 挂载顶级设置区(settings.section)')
+check(sClient.includes('id: "upd-check"'), 'client 设置区 id = upd-check')
+check(!sClient.includes('settings.plugins.tab'), 'client 不再挂载插件页签')
 check(sClient.includes('无法连接 GitHub'), 'client 网络错误提示')
 check(sClient.includes('已是最新版本'), 'client 已是最新提示')
 check(sClient.includes('立即更新'), 'client 发现更新常驻横幅')

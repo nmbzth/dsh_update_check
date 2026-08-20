@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.0 — 修复静态路由注册 + 检查更新提升为独立设置页
+
+- **修复**:静态 host 通过 `inject: ['webServer']` 声明硬依赖——webServer 由 web-app 层提供,可能晚于插件激活;此前 `ctx.get('webServer')` 可能为 undefined 导致 `/upd-check/api/*` 路由未注册(检测不到更新/版本)。
+- **调整**:设置入口从「设置 → 插件」内的页签提升为**顶级设置区**(`settings.section`,id `upd-check`,order 16),与「通用设置 / 模型 / 插件」同级,成为独立功能页。
+- CI 断言同步更新(host inject、settings.section、不再挂插件页签)。
+
 ## v1.3.0 — 移除动态版,仅保留静态插件
 
 - **移除**:`src/` 动态插件版(harness RPC)已删除,仓库只保留 `plugin/` 静态包 `dsh-update-check`。

@@ -287,8 +287,9 @@ window.__ModuleLoader__.load({
 					{ name: "shell.overlay", id: "updcheck.banner" },
 					() => react.createElement(Banner)
 				)));
-				ctx.effect(() => ctx.slots.inject("settings.plugins.tab", () => ctx.slots.register(
-					{ name: "settings.plugins.tab", id: "check-updates", order: 30, label: "检查更新" },
+				// 独立的顶级设置页(与 通用设置/模型/插件 同级)
+				ctx.effect(() => ctx.slots.inject("settings.section", () => ctx.slots.register(
+					{ name: "settings.section", id: "upd-check", order: 16, label: "检查更新" },
 					() => react.createElement(UpdaterTab)
 				)));
 			}
