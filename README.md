@@ -63,7 +63,7 @@
 | DSH 版本适配 | ⚠️ | 插槽名(`shell.overlay`、`settings.plugins.tab`)以 0.1.0-rc.x 实测为准;未来版本若插槽树变化,UI 不挂载但不会崩溃,Host 检查功能不受影响 |
 | 破坏性更新判定 | ✅ | semver 判定确定性可靠;发布说明关键词为尽力而为(README 说明),两者任一命中即黄色预警 + 二次确认 |
 
-## 疑难解答
+## FAQ
 
 - **一直显示「无法连接 GitHub」**:先检查 hosts(`C:\Windows\System32\drivers\etc\hosts`)是否有 `github.com` / `api.github.com` → `127.0.0.1` 的劫持行(常见于 Steamcommunity302 等加速工具);有则删除这些行(需管理员),或直接依赖插件内置的 DNS 绕过。也可尝试点「重试」。
 - **设置页没有「检查更新」页签**:确认插件 Client 半区已运行(查看运行卡片);动态插件重启 DSH 后需要重新加载。
@@ -74,7 +74,7 @@
 
 - `src/host.js` / `src/client.js` 即插件源码(与 `cordis_define` 的 `code.host` / `code.client` 一一对应),修改后重新定义即可(动态插件支持 immutable 包版本演进)。
 - 本地校验:`node scripts/check-src.js`(语法 + 契约检查,CI 同样执行)。
-- 欢迎提交 Issue / PR。
+- 欢迎提交 PR。
 
 ## License
 
