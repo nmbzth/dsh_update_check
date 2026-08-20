@@ -20,7 +20,7 @@
 
 ## 安装方式
 
-### 静态插件（唯一形态）
+### 静态插件
 
 插件以 npm 包 `dsh-update-check` 提供（`plugin/` 目录），挂进宿主 composition，随 DSH 启动自动加载：
 
