@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.0 — 移除安装更新功能，仅保留更新提示
+
+- **移除**:Host 的 `/upd-check/api/install`、`/upd-check/api/install/status` 路由及全部安装逻辑（后台任务、进度轮询、npm 缓存重定向、PowerShell 执行、`lastCheck`/`npmVersionFromTag` 等）；Client 的「立即更新 / 安装更新」按钮、进度条、文件变动窗口、安装二次确认（`installArmed`）、绿色完成提示全部删除。
+- **保留**:检测与提示——顶部横幅（发现新版本 / 破坏性强弱信号黄色预警 + 「了解风险」风险详情页，含命中关键词与原文片段）、设置区独立「↑ 检查更新」页（当前版本/最新版本/状态/立即检查）、稍后忽略、手动检查不弹横幅、hosts 绕过等。
+- 更新由用户手动执行（如 `npm install -g @deepseek-ai/dsh@latest`）。
+
 ## v1.6.0 — 箭头图标 + PowerShell 安装 + 绿色完成提示 + README 国际化
 
 - **调整(设置图标)**:设置区入口标签改为「↑ 检查更新」(DSH 设置外壳的导航图标由内置 `navIcon(id)` 映射决定,自定义 id 只能显示齿轮,因此把向上箭头放进入口标签与页面标题)。
