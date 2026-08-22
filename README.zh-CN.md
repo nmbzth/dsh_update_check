@@ -16,8 +16,7 @@
 6. **破坏性更新预警（重要）**：DSH 官方公告未来将有破坏性更新，可能与旧插件不兼容。插件双重信号检测破坏性更新——① 语义版本（major 变化，或 0.x 阶段 minor 变化）；② 官方发布说明关键词，**分级判定**：
    - **强信号**（breaking change / 破坏性更新 / 破坏…兼容 等）→ 黄色高亮 + ⚠️「检测到破坏性更新」；
    - **弱信号**（不兼容 / incompatible / 迁移 / 移除 / deprecated 等）→ 同样黄色高亮 + ⚠️「检测到**可能**破坏性更新」，风险详情页会**列出命中的关键词与原文片段**（如「…数据结构不兼容…」），由你核实是否真的影响插件；
-   - 风险提示为**信息展示**（「了解风险 → 知道了」），不涉及安装。
-7. **仅检测提示，不安装**：插件从不执行任何安装，只负责检测与提醒；更新请手动执行（如 `npm install -g @deepseek-ai/dsh@latest`）。
+   - 风险提示为**信息展示**（「了解风险 → 知道了」）。
 
 ## 安装方式
 
@@ -36,13 +35,13 @@
 
 3. **重启 DSH**：生效后无需任何手动加载，插件常驻（更新 DSH 后也不用重装）。
 
-> 说明：Host 仅暴露 `GET /upd-check/api/check`（检测接口，**无安装路由**）——通过宿主 `webServer`（Host 以 `inject: ['webServer']` 声明硬依赖，等服务就绪后再注册路由）；浏览器端 client bundle（ModuleLoader 格式）经 `exports["./client"]` + `package.json dsh.client` 声明被 dsh 的 client-modules 自动扫描打包，挂载 `shell.overlay` 横幅，并在设置区注册**独立的「↑ 检查更新」页**（`settings.section`，与「通用设置 / 模型 / 插件」同级，排最后）。
+> 说明：Host 通过宿主 `webServer` 暴露 `GET /upd-check/api/check`（Host 以 `inject: ['webServer']` 声明硬依赖，等服务就绪后再注册路由）；浏览器端 client bundle（ModuleLoader 格式）经 `exports["./client"]` + `package.json dsh.client` 声明被 dsh 的 client-modules 自动扫描打包，挂载 `shell.overlay` 横幅，并在设置区注册**独立的「↑ 检查更新」页**（`settings.section`，与「通用设置 / 模型 / 插件」同级，排最后）。
 
 ## 工作原理
 
 | 半区 | 职责 |
 | --- | --- |
-| Host（`plugin/lib/index.js`） | 拉取 GitHub 官方 API、读取本地已装版本（`npm ls -g` → `npm root -g` + 读 package.json）、版本比较、破坏性信号分级。**无安装功能**。 |
+| Host（`plugin/lib/index.js`） | 拉取 GitHub 官方 API、读取本地已装版本（`npm ls -g` → `npm root -g` + 读 package.json）、版本比较、破坏性信号分级。 |
 | Client（`plugin/lib/client.js`） | `shell.overlay` 顶部横幅 + 设置区独立「↑ 检查更新」页（`settings.section`）；展示更新提醒、破坏性风险详情（含命中关键词片段）与网络错误。 |
 | 通信 | `webServer` HTTP 路由（`/upd-check/api/check`）+ 同源 fetch |
 
@@ -62,7 +61,6 @@
 | hosts 劫持（Steamcommunity302 等） | ✅ | 内置 DNS 直连绕过 |
 | 未挂载 fetch provider 的部署 | ✅ | node 直连通道兜底 |
 | GitHub 匿名 API 限流 | ⚠️ | 60 次/小时/IP；每次页面加载自动检查 1 次，手动检查按需触发，一般足够 |
-| 安装更新 | ❌ | **按设计不提供**——插件只检测与提醒，更新请手动执行（`npm install -g @deepseek-ai/dsh@latest`） |
 | DSH 版本适配 | ⚠️ | 插槽名（`shell.overlay`、`settings.section`）以 0.1.0-rc.x 实测为准；未来版本若插槽树变化，UI 不挂载但不会崩溃，Host 检查功能不受影响 |
 | 破坏性更新判定 | ✅ | semver 判定确定性可靠；发布说明关键词分级（强信号直接判破坏性；弱信号黄色预警并展示命中关键词与原文片段供核实） |
 | 静态插件 | ✅ | 随 DSH 启动自动加载，重启/更新 DSH 后无需重装；Host 无 `harness`，走 `webServer` HTTP 接口（同源，仅本机监听） |

@@ -18,7 +18,7 @@
    - **Official release notes**: keyword matching, **graded**:
      - **Strong signals** (`breaking change`, `破坏性更新`, `破坏…兼容`, etc.) → yellow highlight + ⚠️ "Breaking update detected";
      - **Weak signals** (`incompatible`, `migration`, `removed`, `deprecated`, `不兼容`, `迁移`, `移除`, etc.) → yellow highlight + ⚠️ "Possibly breaking update", and the details page **lists the matched keywords and the original snippets** for you to verify.
-7. **Check only, no install** — the plugin never installs anything: it only detects and reminds. Updates are applied manually (e.g. `npm install -g @deepseek-ai/dsh@latest`).
+   - Risk details are **informational only** ("Learn the risk" → "Got it").
 
 ## Installation
 
@@ -37,13 +37,13 @@ The plugin is distributed as the npm package `dsh-update-check` (`plugin/` direc
 
 3. **Restart DSH**: it takes effect without any manual loading and stays resident (no reinstall needed after DSH updates).
 
-> Note: the Host exposes `GET /upd-check/api/check` (check only — no install routes) through the host `webServer` (the Host declares `inject: ['webServer']` as a hard dependency so routes register after the service is ready). The browser client bundle (ModuleLoader format) is auto-bundled by dsh's client-modules via `exports["./client"]` + the `dsh.client` field in `package.json`; it mounts the `shell.overlay` banner and registers the **dedicated "Check for updates" page** (`settings.section`, same level as General / Models / Plugins).
+> Note: the Host exposes `GET /upd-check/api/check` through the host `webServer` (the Host declares `inject: ['webServer']` as a hard dependency so routes register after the service is ready). The browser client bundle (ModuleLoader format) is auto-bundled by dsh's client-modules via `exports["./client"]` + the `dsh.client` field in `package.json`; it mounts the `shell.overlay` banner and registers the **dedicated "Check for updates" page** (`settings.section`, same level as General / Models / Plugins).
 
 ## How it works
 
 | Side | Responsibility |
 | --- | --- |
-| Host (`plugin/lib/index.js`) | Fetches GitHub official APIs, reads the locally installed version (`npm ls -g` → `npm root -g` + read package.json), compares versions, and grades breaking-change signals. No install functionality. |
+| Host (`plugin/lib/index.js`) | Fetches GitHub official APIs, reads the locally installed version (`npm ls -g` → `npm root -g` + read package.json), compares versions, and grades breaking-change signals. |
 | Client (`plugin/lib/client.js`) | `shell.overlay` top banner + the dedicated Settings page (`settings.section`); shows update reminders, breaking-risk details with matched keyword snippets, and network errors. |
 | Communication | `webServer` HTTP route (`/upd-check/api/check`) + same-origin fetch |
 
@@ -63,7 +63,6 @@ The plugin is distributed as the npm package `dsh-update-check` (`plugin/` direc
 | hosts hijacking (Steamcommunity302 etc.) | ✅ | Built-in DNS direct-connect bypass |
 | Deployments without a fetch provider | ✅ | Node direct-connect fallback |
 | GitHub anonymous API rate limit | ⚠️ | 60 req/h/IP; one auto-check per page load plus on-demand manual checks are usually enough |
-| Install update | ❌ | **Not provided by design** — the plugin only detects and reminds; apply updates manually (`npm install -g @deepseek-ai/dsh@latest`) |
 | DSH version adaptation | ⚠️ | Slot names (`shell.overlay`, `settings.section`) verified against 0.1.0-rc.x; if the slot tree changes in future versions the UI simply won't mount (no crash), and Host checks keep working |
 | Breaking-change detection | ✅ | Semver detection is deterministic; release-note keywords are graded (strong → breaking; weak → yellow warning with matched keywords and snippets) |
 | Static plugin | ✅ | Auto-loads with DSH; no reinstall after DSH restart/update; Host has no `harness`, uses same-origin `webServer` HTTP (localhost only) |
