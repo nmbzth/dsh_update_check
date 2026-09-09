@@ -23,6 +23,7 @@
    - **Weak signals** (`incompatible`, `migration`, `removed`, `deprecated`, `不兼容`, `迁移`, `移除`, etc.) → yellow warning "possibly breaking update", with the complete matched item shown for you to judge.
    - Informational only — no install, no confirmation flow.
 9. **Network failure notice** — when GitHub is unreachable, the top banner shows "Cannot reach GitHub, check failed" with **Retry / Close**.
+10. **Bilingual UI (Chinese / English)** — the plugin registers zh/en dictionaries through the DSH client `locale` service and follows the active language live (banner, settings page and nav label); it falls back to the built-in Chinese dictionary when the locale service is unavailable.
 
 ## Installation
 

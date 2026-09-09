@@ -1,7 +1,7 @@
 {
   "name": "dsh-update-check",
-  "description": "DSH 静态插件:检测上游 deepseek-harness 与插件自身更新,结构化展示新功能/修复/破坏性改动,启动检查与横幅详细度可开关。",
-  "version": "1.8.0",
+  "description": "DSH 静态插件:检测上游 deepseek-harness 与插件自身更新,结构化展示新功能/修复/破坏性改动,启动检查与横幅详细度可开关;界面支持中英双语。",
+  "version": "1.9.0",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -14,6 +14,7 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-slots"
       ],
       "platform": "web"
@@ -26,6 +27,7 @@
     "dsh",
     "deepseek-harness",
     "plugin",
-    "updater"
+    "updater",
+    "i18n"
   ]
 }

@@ -24,6 +24,7 @@ check(sPkg.type === 'module' && sPkg.main === 'lib/index.js', 'ESM 入口')
 check(sPkg.exports && sPkg.exports['./client'] === './lib/client.js', 'exports["./client"]')
 check(sPkg.dsh && sPkg.dsh.client && sPkg.dsh.client.platform === 'web', 'dsh.client platform=web')
 check(sPkg.dsh.client.inject && sPkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-slots'), '注入 slots 运行时')
+check(sPkg.dsh.client.inject && sPkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-locale'), '注入 locale 运行时(i18n)')
 
 // 2) Host 半区
 try {
@@ -73,9 +74,36 @@ check(!sClient.includes('settings.plugins.tab'), 'client 不再挂载插件页�
 check(sClient.includes('verboseBanner'), 'client 支持详细/简略两态')
 check(sClient.includes('checkOnStartup') && sClient.includes('checkPluginOnStartup'), 'client 两个启动检查开关')
 check(sClient.includes('saveSettings') && sClient.includes('API_SETTINGS'), 'client 可写入设置')
-check(sClient.includes('renderSections') && sClient.includes('SECTION_TITLES'), 'client 展示改动分类')
+check(sClient.includes('renderSections') && sClient.includes('"section.features"') && sClient.includes('"section.fixes"'), 'client 展示改动分类(字典化标题)')
 check(sClient.includes('renderSignals'), 'client 展示完整命中描述')
-check(sClient.includes('破坏性相关描述（完整）'), '设置页显示完整命中描述')
+check(sClient.includes('"section.breakingFull": "破坏性相关描述（完整）："'), '设置页完整命中描述文案在字典中')
+check(sClient.includes('const DICT = {') && sClient.includes('zh: {') && sClient.includes('en: {'), 'client 内置 zh/en 字典')
+check(sClient.includes('locale.register(NS, "zh"') && sClient.includes('locale.register(NS, "en"'), 'client 注册两种语言字典')
+check(sClient.includes('locale.bind(NS)'), 'client 绑定 locale 翻译')
+check(sClient.includes('locale.subscribe'), 'client 响应语言切换重渲染')
+check(sClient.includes('fallbackTranslate'), 'locale 服务缺失时回退内置字典')
+{
+  const zhBlock = sClient.slice(sClient.indexOf('zh: {'), sClient.indexOf('en: {'))
+  const enBlock = sClient.slice(sClient.indexOf('en: {'), sClient.indexOf('// 回退翻译'))
+  const keysOf = (block) => new Set([...block.matchAll(/"([A-Za-z.]+)":/g)].map((m) => m[1]))
+  const zhKeys = keysOf(zhBlock)
+  const enKeys = keysOf(enBlock)
+  const missingEn = [...zhKeys].filter((k) => !enKeys.has(k))
+  const missingZh = [...enKeys].filter((k) => !zhKeys.has(k))
+  check(
+    zhKeys.size > 0 && missingEn.length === 0 && missingZh.length === 0,
+    'zh/en 字典键完全一致(' + zhKeys.size + ' 键' + (missingEn.length ? ', 缺 en: ' + missingEn.join(',') : '') + (missingZh.length ? ', 缺 zh: ' + missingZh.join(',') : '') + ')'
+  )
+}
+check(
+  !/[\u4e00-\u9fff]/.test(
+    sClient
+      .replace(/const DICT = \{[\s\S]*?\n\t\t\};/, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+  ),
+  'client 界面文案全部走字典(字典与注释外无硬编码中文)'
+)
 check(sClient.includes('已是最新版本') && sClient.includes('无法连接 GitHub'), 'client 保留最新/网络错误提示')
 check(!sClient.includes('confirm-breaking'), 'client 已移除「了解风险/确认更新」旧链路')
 check(!sClient.includes('我了解风险'), 'client 已移除旧确认按钮文案')

@@ -1,5 +1,6 @@
 // dsh-update-check — 静态 Client 半区(浏览器 bundle,ModuleLoader 格式)
-// 纯提示型:顶部横幅(简略/详细两态)+ 设置区独立页(版本、上游改动、插件自身更新、三个开关)。
+// 多语言:注册 dsh-update-check 命名空间的 zh / en 字典,经 client locale 服务翻译;
+// 语言切换通过 locale.subscribe 触发重渲染。locale 服务缺失时回退内置中文字典。
 window.__ModuleLoader__.load({
 	id: "dsh-update-check",
 	factory: (require) => {
@@ -8,16 +9,153 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
 
+		const NS = "dsh-update-check";
 		const API_CHECK = "/upd-check/api/check";
 		const API_SETTINGS = "/upd-check/api/settings";
 
-		const SECTION_TITLES = {
-			features: "新增功能",
-			fixes: "问题修复",
-			improvements: "体验优化",
-			other: "其他变更",
-			sdk: "SDK"
+		const DICT = {
+			zh: {
+				"banner.checking": "正在检查更新…",
+				"banner.upToDate": "已是最新版本：{version}",
+				"banner.upToDateBare": "已是最新版本",
+				"banner.update": "发现更新：{items}",
+				"banner.updateBreaking": "⚠️ 发现更新（含破坏性变更）：{items}",
+				"banner.dshItem": "DSH {from} → {to}",
+				"banner.pluginItem": "插件 {from} → {to}",
+				"banner.details": "详情",
+				"banner.collapse": "收起",
+				"banner.later": "稍后",
+				"banner.retry": "重试",
+				"banner.close": "关闭",
+				"banner.networkError": "无法连接 GitHub，检查失败（网络不佳或 GitHub 不可达）",
+				"banner.noRelease": "GitHub 上未找到版本信息",
+				"banner.breakingHint": "该版本包含疑似破坏性变更，请确认插件兼容性后再更新：",
+				"banner.pluginHint": "插件自身有新版本：{from} → {to}（见设置页）",
+				"page.title": "↑ 检查更新",
+				"card.dsh": "DSH 更新",
+				"card.plugin": "插件自身更新",
+				"card.settings": "设置",
+				"row.currentDsh": "当前 DSH 版本",
+				"row.latestDsh": "最新 DSH 版本",
+				"row.publishedAt": "发布时间",
+				"row.lastCheck": "上次检查",
+				"row.status": "状态",
+				"row.currentPlugin": "当前插件版本",
+				"row.latestPlugin": "最新插件版本",
+				"btn.checkNow": "立即检查",
+				"btn.releaseNotes": "查看发布说明",
+				"status.idle": "未检查",
+				"status.checking": "检查中…",
+				"status.upToDate": "已是最新",
+				"status.update": "发现更新",
+				"status.error": "检查失败",
+				"badge.update": "发现新版本",
+				"badge.breakingUpdate": "发现更新（含破坏性变更）",
+				"section.breakingFull": "破坏性相关描述（完整）：",
+				"section.changes": "本次改动",
+				"section.none": "（无发布说明可展示）",
+				"section.notesError": "（未获取到发布说明：{error}）",
+				"section.more": "… 另有 {count} 条，见设置页",
+				"section.features": "新增功能",
+				"section.fixes": "问题修复",
+				"section.improvements": "体验优化",
+				"section.other": "其他变更",
+				"section.sdk": "SDK",
+				"plugin.statusUpdate": "有新版本（请手动替换 plugin/ 目录）",
+				"plugin.statusLatest": "已是最新",
+				"plugin.statusUnchecked": "未检查",
+				"plugin.repo": "插件仓库",
+				"value.unknown": "未知",
+				"value.unavailable": "无法获取",
+				"value.dash": "—",
+				"switch.checkDsh": "每次启动检查 DSH 更新",
+				"switch.checkDshHint": "打开页面时自动检查上游是否有新版本",
+				"switch.checkPlugin": "每次启动检查插件自身更新",
+				"switch.checkPluginHint": "打开页面时自动检查本插件是否有新版本",
+				"switch.verbose": "顶部窗口显示描述细节",
+				"switch.verboseHint": "开：横幅直接展示改动细节；关：只显示版本提示，点「详情」展开",
+				"error.checkFailed": "检查失败：{message}",
+				"error.upstreamFailed": "上游检查失败：{error}",
+				"error.settingsSave": "设置保存失败：{error}",
+				"signal.strong": "强信号",
+				"signal.weak": "弱信号",
+				"signal.hit": "[{level}] 命中关键词：{keyword}"
+			},
+			en: {
+				"banner.checking": "Checking for updates…",
+				"banner.upToDate": "Up to date: {version}",
+				"banner.upToDateBare": "Up to date",
+				"banner.update": "Update available: {items}",
+				"banner.updateBreaking": "⚠️ Update available (breaking changes): {items}",
+				"banner.dshItem": "DSH {from} → {to}",
+				"banner.pluginItem": "Plugin {from} → {to}",
+				"banner.details": "Details",
+				"banner.collapse": "Collapse",
+				"banner.later": "Later",
+				"banner.retry": "Retry",
+				"banner.close": "Close",
+				"banner.networkError": "Cannot reach GitHub — check failed (network issue or GitHub unreachable)",
+				"banner.noRelease": "No version info found on GitHub",
+				"banner.breakingHint": "This version may contain breaking changes — verify plugin compatibility before updating:",
+				"banner.pluginHint": "The plugin itself has a new version: {from} → {to} (see Settings)",
+				"page.title": "↑ Check for updates",
+				"card.dsh": "DSH update",
+				"card.plugin": "Plugin self-update",
+				"card.settings": "Settings",
+				"row.currentDsh": "Current DSH version",
+				"row.latestDsh": "Latest DSH version",
+				"row.publishedAt": "Published at",
+				"row.lastCheck": "Last checked",
+				"row.status": "Status",
+				"row.currentPlugin": "Current plugin version",
+				"row.latestPlugin": "Latest plugin version",
+				"btn.checkNow": "Check now",
+				"btn.releaseNotes": "Release notes",
+				"status.idle": "Not checked",
+				"status.checking": "Checking…",
+				"status.upToDate": "Up to date",
+				"status.update": "Update available",
+				"status.error": "Check failed",
+				"badge.update": "New version available",
+				"badge.breakingUpdate": "Update available (breaking changes)",
+				"section.breakingFull": "Breaking-change descriptions (full):",
+				"section.changes": "Changes in this release",
+				"section.none": "(no release notes to show)",
+				"section.notesError": "(release notes unavailable: {error})",
+				"section.more": "… {count} more, see Settings",
+				"section.features": "New features",
+				"section.fixes": "Bug fixes",
+				"section.improvements": "Improvements",
+				"section.other": "Other changes",
+				"section.sdk": "SDK",
+				"plugin.statusUpdate": "New version available (replace the plugin/ directory manually)",
+				"plugin.statusLatest": "Up to date",
+				"plugin.statusUnchecked": "Not checked",
+				"plugin.repo": "Plugin repository",
+				"value.unknown": "Unknown",
+				"value.unavailable": "Unavailable",
+				"value.dash": "—",
+				"switch.checkDsh": "Check DSH updates on startup",
+				"switch.checkDshHint": "Automatically check the upstream repo when the page loads",
+				"switch.checkPlugin": "Check plugin updates on startup",
+				"switch.checkPluginHint": "Automatically check this plugin's own version when the page loads",
+				"switch.verbose": "Show details in the top banner",
+				"switch.verboseHint": "On: expand details in the banner; Off: show only the version line with a Details button",
+				"error.checkFailed": "Check failed: {message}",
+				"error.upstreamFailed": "Upstream check failed: {error}",
+				"error.settingsSave": "Failed to save settings: {error}",
+				"signal.strong": "Strong",
+				"signal.weak": "Weak",
+				"signal.hit": "[{level}] Matched keyword: {keyword}"
+			}
 		};
+
+		// 回退翻译(locale 服务不可用时使用内置中文)
+		function fallbackTranslate(key, params) {
+			const template = DICT.zh[key] || key;
+			if (!params) return template;
+			return template.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match));
+		}
 
 		const STYLE = {
 			banner: {
@@ -117,6 +255,26 @@ window.__ModuleLoader__.load({
 		function apply(ctx) {
 			const timer = ctx.get("timer");
 			const store = getStore();
+			const locale = ctx.get("locale");
+
+			// 注册双语字典并绑定翻译;locale 服务缺失时回退内置中文
+			let translate = fallbackTranslate;
+			if (locale) {
+				ctx.effect(() => locale.register(NS, "zh", DICT.zh), "dsh-update-check: zh dictionary");
+				ctx.effect(() => locale.register(NS, "en", DICT.en), "dsh-update-check: en dictionary");
+				translate = locale.bind(NS);
+			}
+			function t(key, params) {
+				return translate(key, params);
+			}
+			// 语言切换时强制重渲染
+			function useLocaleTick() {
+				const [, setTick] = react.useState(0);
+				react.useEffect(() => {
+					if (!locale) return undefined;
+					return locale.subscribe(() => setTick((v) => v + 1));
+				}, []);
+			}
 
 			async function doCheck(options) {
 				const opts = options || {};
@@ -189,21 +347,22 @@ window.__ModuleLoader__.load({
 				const sections = (dsh && dsh.sections) || [];
 				if (sections.length === 0) {
 					return dsh && dsh.notesError
-						? react.createElement("div", { style: STYLE.dim }, "（未获取到发布说明：" + dsh.notesError + "）")
+						? react.createElement("div", { style: STYLE.dim }, t("section.notesError", { error: dsh.notesError }))
 						: null;
 				}
 				return sections.map((section) => {
 					const items = limit ? section.items.slice(0, limit) : section.items;
 					const hidden = section.items.length - items.length;
+					const title = t("section." + section.key);
 					return react.createElement("div", { style: STYLE.sectionBlock, key: section.key },
-						react.createElement("div", { style: STYLE.sectionTitle }, (SECTION_TITLES[section.key] || section.title || section.key) + "（" + section.items.length + "）"),
+						react.createElement("div", { style: STYLE.sectionTitle }, title + "（" + section.items.length + "）"),
 						react.createElement("ul", { style: STYLE.list },
 							items.map((item, index) => react.createElement("li", {
 								key: index,
 								style: item.breaking ? STYLE.itemBreaking : STYLE.item
 							}, (item.breaking ? "⚠️ " : "") + item.text))
 						),
-						hidden > 0 ? react.createElement("div", { style: STYLE.dim }, "… 另有 " + hidden + " 条，见设置页") : null
+						hidden > 0 ? react.createElement("div", { style: STYLE.dim }, t("section.more", { count: hidden })) : null
 					);
 				});
 			}
@@ -212,12 +371,16 @@ window.__ModuleLoader__.load({
 				const signals = (dsh && dsh.signals) || [];
 				if (signals.length === 0) return null;
 				return signals.map((s, index) => react.createElement("div", { style: STYLE.signalRow, key: index },
-					react.createElement("span", { style: STYLE.signalKeyword }, "[" + (s.level === "strong" ? "强信号" : "弱信号") + "] 命中关键词：" + s.keyword),
+					react.createElement("span", { style: STYLE.signalKeyword }, t("signal.hit", {
+						level: t(s.level === "strong" ? "signal.strong" : "signal.weak"),
+						keyword: s.keyword
+					})),
 					react.createElement("span", { style: STYLE.signalContext }, s.item)
 				));
 			}
 
 			function Banner() {
+				useLocaleTick();
 				const [state, setState] = react.useState(store.getState());
 				react.useEffect(() => store.subscribe(setState), []);
 				react.useEffect(() => {
@@ -225,8 +388,8 @@ window.__ModuleLoader__.load({
 					const delay = state.phase === "checking" ? 4000 : 2500;
 					const dispose = timer ? timer.timeout(() => store.setIf(state.phase, { phase: "idle" }), delay) : null;
 					if (!dispose) {
-						const t = setTimeout(() => store.setIf(state.phase, { phase: "idle" }), delay);
-						return () => clearTimeout(t);
+						const timeoutId = setTimeout(() => store.setIf(state.phase, { phase: "idle" }), delay);
+						return () => clearTimeout(timeoutId);
 					}
 					return dispose;
 				}, [state.phase, state.bannerVisible]);
@@ -243,25 +406,25 @@ window.__ModuleLoader__.load({
 				let title = "";
 				let buttons = [];
 				if (state.phase === "checking") {
-					title = "正在检查更新…";
+					title = t("banner.checking");
 				} else if (state.phase === "up-to-date") {
-					title = "已是最新版本" + (dsh && dsh.latest ? "：" + dsh.latest : "");
+					title = dsh && dsh.latest
+						? t("banner.upToDate", { version: dsh.latest })
+						: t("banner.upToDateBare");
 				} else if (state.phase === "update") {
-					const parts = [];
-					if (dsh && dsh.updateAvailable) parts.push("DSH " + (dsh.current || "?") + " → " + (dsh.latest || "?"));
-					if (plugin && plugin.updateAvailable) parts.push("插件 " + (plugin.current || "?") + " → " + (plugin.latest || "?"));
-					title = (warning ? "⚠️ 发现更新（含破坏性变更）：" : "发现更新：") + parts.join("；");
+					const items = [];
+					if (dsh && dsh.updateAvailable) items.push(t("banner.dshItem", { from: dsh.current || "?", to: dsh.latest || "?" }));
+					if (plugin && plugin.updateAvailable) items.push(t("banner.pluginItem", { from: plugin.current || "?", to: plugin.latest || "?" }));
+					title = t(warning ? "banner.updateBreaking" : "banner.update", { items: items.join("；") });
 					buttons = [
-						{ label: expanded ? "收起" : "详情", primary: true, onClick: () => store.set({ expanded: !expanded }) },
-						{ label: "稍后", primary: false, onClick: () => store.set({ phase: "idle", dismissedLatest: updateKey }) }
+						{ label: t(expanded ? "banner.collapse" : "banner.details"), primary: true, onClick: () => store.set({ expanded: !expanded }) },
+						{ label: t("banner.later"), primary: false, onClick: () => store.set({ phase: "idle", dismissedLatest: updateKey }) }
 					];
 				} else if (state.phase === "error") {
-					title = state.errorKind === "no-release"
-						? "GitHub 上未找到版本信息"
-						: "无法连接 GitHub，检查失败（网络不佳或 GitHub 不可达）";
+					title = t(state.errorKind === "no-release" ? "banner.noRelease" : "banner.networkError");
 					buttons = [
-						{ label: "重试", primary: true, onClick: () => { doCheck({ source: "banner" }).catch(() => {}); } },
-						{ label: "关闭", primary: false, onClick: () => store.set({ phase: "idle" }) }
+						{ label: t("banner.retry"), primary: true, onClick: () => { doCheck({ source: "banner" }).catch(() => {}); } },
+						{ label: t("banner.close"), primary: false, onClick: () => store.set({ phase: "idle" }) }
 					];
 				}
 
@@ -269,12 +432,12 @@ window.__ModuleLoader__.load({
 				return react.createElement("div", { style: warning ? STYLE.bannerWarning : STYLE.banner, role: "alert" },
 					react.createElement("div", { style: STYLE.text }, title),
 					showDetails && dsh ? react.createElement("div", null,
-						dsh.breaking ? react.createElement("div", { style: STYLE.warningText }, "该版本包含疑似破坏性变更，请确认插件兼容性后再更新：") : null,
+						dsh.breaking ? react.createElement("div", { style: STYLE.warningText }, t("banner.breakingHint")) : null,
 						renderSignals(dsh),
 						renderSections(dsh, 3)
 					) : null,
 					showDetails && plugin && plugin.updateAvailable ? react.createElement("div", { style: STYLE.dim },
-						"插件自身有新版本：" + (plugin.current || "?") + " → " + (plugin.latest || "?") + "（见设置页）"
+						t("banner.pluginHint", { from: plugin.current || "?", to: plugin.latest || "?" })
 					) : null,
 					react.createElement("div", { style: STYLE.btnRow },
 						buttons.map((b) => react.createElement("button", {
@@ -302,6 +465,7 @@ window.__ModuleLoader__.load({
 			}
 
 			function UpdaterTab() {
+				useLocaleTick();
 				const [state, setState] = react.useState(store.getState());
 				react.useEffect(() => store.subscribe(setState), []);
 				const dsh = state.dsh;
@@ -309,23 +473,35 @@ window.__ModuleLoader__.load({
 				const settings = state.settings || { checkOnStartup: true, checkPluginOnStartup: true, verboseBanner: false };
 				const busy = state.phase === "checking";
 				const phaseLabel = {
-					idle: "未检查", checking: "检查中…", "up-to-date": "已是最新", update: "发现更新", error: "检查失败"
+					idle: t("status.idle"),
+					checking: t("status.checking"),
+					"up-to-date": t("status.upToDate"),
+					update: t("status.update"),
+					error: t("status.error")
 				}[state.phase] || state.phase;
-				const fmtTime = (value) => value ? new Date(value).toLocaleString() : "—";
+				const fmtTime = (value) => value ? new Date(value).toLocaleString() : t("value.dash");
+				const unknown = t("value.unknown");
 
 				const rows = [
-					["当前 DSH 版本", (dsh && dsh.current) || "未知"],
-					["最新 DSH 版本", (dsh && dsh.latest) || "—"],
-					["发布时间", dsh && dsh.publishedAt ? fmtTime(dsh.publishedAt) : "—"],
-					["上次检查", fmtTime(state.checkedAt)],
-					["状态", phaseLabel]
+					[t("row.currentDsh"), (dsh && dsh.current) || unknown],
+					[t("row.latestDsh"), (dsh && dsh.latest) || t("value.dash")],
+					[t("row.publishedAt"), dsh && dsh.publishedAt ? fmtTime(dsh.publishedAt) : t("value.dash")],
+					[t("row.lastCheck"), fmtTime(state.checkedAt)],
+					[t("row.status"), phaseLabel]
+				];
+				const pluginRows = [
+					[t("row.currentPlugin"), (plugin && plugin.current) || unknown],
+					[t("row.latestPlugin"), (plugin && plugin.latest) || (plugin && plugin.error ? t("value.unavailable") : t("value.dash"))],
+					[t("row.status"), plugin
+						? (plugin.updateAvailable ? t("plugin.statusUpdate") : t("plugin.statusLatest"))
+						: t("plugin.statusUnchecked")]
 				];
 
 				return react.createElement("div", { style: STYLE.tab },
-					react.createElement("h3", { style: STYLE.tabTitle }, "↑ 检查更新"),
+					react.createElement("h3", { style: STYLE.tabTitle }, t("page.title")),
 
 					react.createElement("div", { style: STYLE.card },
-						react.createElement("h4", { style: STYLE.cardTitle }, "DSH 更新"),
+						react.createElement("h4", { style: STYLE.cardTitle }, t("card.dsh")),
 						react.createElement("div", null,
 							rows.map((r) => react.createElement("div", { style: STYLE.row, key: r[0] },
 								react.createElement("span", { style: STYLE.rowKey }, r[0]),
@@ -337,77 +513,74 @@ window.__ModuleLoader__.load({
 								style: Object.assign({}, STYLE.actionBtn, STYLE.btnPrimary),
 								disabled: busy,
 								onClick: () => { doCheck({ dsh: true, plugin: true, source: "manual" }).catch(() => {}); }
-							}, "立即检查"),
+							}, t("btn.checkNow")),
 							dsh && dsh.updateAvailable
 								? react.createElement("span", { style: dsh.breaking ? STYLE.warnText : STYLE.okText },
-									dsh.breaking ? "发现更新（含破坏性变更）" : "发现新版本")
+									t(dsh.breaking ? "badge.breakingUpdate" : "badge.update"))
 								: null,
 							dsh && dsh.releaseUrl
-								? react.createElement("a", { style: STYLE.link, href: dsh.releaseUrl, target: "_blank", rel: "noreferrer" }, "查看发布说明")
+								? react.createElement("a", { style: STYLE.link, href: dsh.releaseUrl, target: "_blank", rel: "noreferrer" }, t("btn.releaseNotes"))
 								: null
 						),
 						dsh && dsh.signals && dsh.signals.length > 0
 							? react.createElement("div", null,
-								react.createElement("div", { style: STYLE.warningText }, "破坏性相关描述（完整）："),
+								react.createElement("div", { style: STYLE.warningText }, t("section.breakingFull")),
 								renderSignals(dsh)
 							)
 							: null,
 						dsh && dsh.sections && dsh.sections.length > 0
 							? react.createElement("div", null,
-								react.createElement("div", { style: STYLE.sectionTitle }, "本次改动"),
+								react.createElement("div", { style: STYLE.sectionTitle }, t("section.changes")),
 								renderSections(dsh, 0)
 							)
-							: (dsh ? react.createElement("div", { style: STYLE.dim }, "（无发布说明可展示）") : null),
+							: (dsh ? react.createElement("div", { style: STYLE.dim }, t("section.none")) : null),
 						state.dshError
-							? react.createElement("div", { style: STYLE.error }, "上游检查失败：" + state.dshError)
+							? react.createElement("div", { style: STYLE.error }, t("error.upstreamFailed", { error: state.dshError }))
 							: null
 					),
 
 					react.createElement("div", { style: STYLE.card },
-						react.createElement("h4", { style: STYLE.cardTitle }, "插件自身更新"),
+						react.createElement("h4", { style: STYLE.cardTitle }, t("card.plugin")),
 						react.createElement("div", null,
-							[["当前插件版本", (plugin && plugin.current) || "未知"],
-							 ["最新插件版本", (plugin && plugin.latest) || (plugin && plugin.error ? "无法获取" : "—")],
-							 ["状态", plugin && plugin.updateAvailable ? "有新版本（请手动替换 plugin/ 目录）" : (plugin ? "已是最新" : "未检查")]]
-								.map((r) => react.createElement("div", { style: STYLE.row, key: r[0] },
-									react.createElement("span", { style: STYLE.rowKey }, r[0]),
-									react.createElement("span", null, r[1])
-								))
+							pluginRows.map((r) => react.createElement("div", { style: STYLE.row, key: r[0] },
+								react.createElement("span", { style: STYLE.rowKey }, r[0]),
+								react.createElement("span", null, r[1])
+							))
 						),
 						plugin && plugin.repoUrl
 							? react.createElement("div", null,
-								react.createElement("a", { style: STYLE.link, href: plugin.repoUrl, target: "_blank", rel: "noreferrer" }, "插件仓库")
+								react.createElement("a", { style: STYLE.link, href: plugin.repoUrl, target: "_blank", rel: "noreferrer" }, t("plugin.repo"))
 							)
 							: null
 					),
 
 					react.createElement("div", { style: STYLE.card },
-						react.createElement("h4", { style: STYLE.cardTitle }, "设置"),
+						react.createElement("h4", { style: STYLE.cardTitle }, t("card.settings")),
 						react.createElement(SwitchRow, {
-							label: "每次启动检查 DSH 更新",
-							hint: "打开页面时自动检查上游是否有新版本",
+							label: t("switch.checkDsh"),
+							hint: t("switch.checkDshHint"),
 							checked: settings.checkOnStartup,
 							onChange: (value) => { saveSettings({ checkOnStartup: value }).catch(() => {}); }
 						}),
 						react.createElement(SwitchRow, {
-							label: "每次启动检查插件自身更新",
-							hint: "打开页面时自动检查本插件是否有新版本",
+							label: t("switch.checkPlugin"),
+							hint: t("switch.checkPluginHint"),
 							checked: settings.checkPluginOnStartup,
 							onChange: (value) => { saveSettings({ checkPluginOnStartup: value }).catch(() => {}); }
 						}),
 						react.createElement(SwitchRow, {
-							label: "顶部窗口显示描述细节",
-							hint: "开：横幅直接展示改动细节；关：只显示版本提示，点「详情」展开",
+							label: t("switch.verbose"),
+							hint: t("switch.verboseHint"),
 							checked: settings.verboseBanner,
 							onChange: (value) => { saveSettings({ verboseBanner: value }).catch(() => {}); }
 						}),
 						state.settingsError
-							? react.createElement("div", { style: STYLE.error }, "设置保存失败：" + state.settingsError)
+							? react.createElement("div", { style: STYLE.error }, t("error.settingsSave", { error: state.settingsError }))
 							: null
 					),
 
 					state.phase === "error"
-						? react.createElement("div", { style: STYLE.error }, "检查失败：" + (state.message || ""))
+						? react.createElement("div", { style: STYLE.error }, t("error.checkFailed", { message: state.message || "" }))
 						: null
 				);
 			}
@@ -418,7 +591,7 @@ window.__ModuleLoader__.load({
 					() => react.createElement(Banner)
 				)));
 				ctx.effect(() => ctx.slots.inject("settings.section", () => ctx.slots.register(
-					{ name: "settings.section", id: "upd-check", order: 9999, label: "↑ 检查更新" },
+					{ name: "settings.section", id: "upd-check", order: 9999, label: () => t("page.title") },
 					() => react.createElement(UpdaterTab)
 				)));
 			}
