@@ -48,7 +48,8 @@ try {
   $localFiles = @((git ls-files) | Where-Object { $_ })
   $changed = @()
   foreach ($file in $localFiles) {
-    $sha = (git hash-object $file).Trim()
+    # 用仓库内 blob sha(已按 autocrlf 规范化)与远端 tree 比较,避免工作区行尾差异造成误报
+    $sha = (git rev-parse "HEAD:$file").Trim()
     if ($remote.ContainsKey($file) -and $remote[$file] -eq $sha) { continue }
     $changed += $file
   }
