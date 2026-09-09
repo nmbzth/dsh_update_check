@@ -8,17 +8,21 @@
 
 ## Features
 
-1. **Check on startup** — checks the official repository 3 seconds after the page loads (and again on `connection/reset`).
-2. **Based on the official GitHub repo** — tries `releases/latest` API → `tags` API → releases page HTML in order, with a 10 s timeout; tags with a `dsh-v*` prefix parse correctly (semver-style comparison, including rc/beta prereleases).
-3. **Network failure notice** — when GitHub is unreachable, the top banner shows "Cannot reach GitHub, check failed" with **Retry / Close**.
-4. **Persistent update reminder** — "New version: current X → latest Y" with **Later**, **no auto-dismiss timer** (only clicking closes it). After clicking **Later**, the same version never pops up again (not even from the settings page's manual "Check now"); it only reappears when a new version (`latest` changes) is published.
-5. **Dedicated settings page** — a standalone **"↑ Check for updates"** page in Settings (same level as General / Models / Plugins, **listed last**), showing current version / latest version / last check / status, with a "Check now" button.
-6. **Breaking-change warning (important)** — DSH has announced future breaking updates that may be incompatible with older plugins. The plugin detects breaking updates with two signals, **graded**:
-   - **Semver** (deterministic): major change, or minor change during 0.x.
-   - **Official release notes**: keyword matching, **graded**:
-     - **Strong signals** (`breaking change`, `破坏性更新`, `破坏…兼容`, etc.) → yellow highlight + ⚠️ "Breaking update detected";
-     - **Weak signals** (`incompatible`, `migration`, `removed`, `deprecated`, `不兼容`, `迁移`, `移除`, etc.) → yellow highlight + ⚠️ "Possibly breaking update", and the details page **lists the matched keywords and the original snippets** for you to verify.
-   - Risk details are **informational only** ("Learn the risk" → "Got it").
+1. **Check on startup (toggleable)** — checks 3 seconds after the page load (and again on `connection/reset`); the DSH check and the plugin's own check are **separate switches**.
+2. **Based on the official GitHub repo** — tries `releases/latest` API → releases list → `tags` API in order, with a 10 s timeout; tags with a `dsh-v*` prefix parse correctly (semver-style comparison, including rc/beta prereleases).
+3. **Structured upstream changes** — the release notes are parsed into sections (**new features / bug fixes / improvements / other / SDK**); the Chinese block is preferred; every item keeps its **full text**; items matching breaking keywords are flagged as strong/weak signals and highlighted.
+4. **Plugin self-update check** — compares the local `package.json` version with the repo's `plugin/package.json` (informational only; replace the `plugin/` directory manually).
+5. **Two-state top banner** — **concise** (one line "Update available: DSH X → Y" + Details / Later) or **verbose** (details expanded immediately), controlled by a switch; **no auto-dismiss**; "Later" remembers the version so it does not pop up again until a newer version appears.
+6. **Dedicated settings page** — a standalone **"↑ Check for updates"** page in Settings (same level as General / Models / Plugins), with three cards:
+   - **DSH update**: current/latest version, publish time, last check, status, "Check now", release-notes link, **full breaking-change descriptions** (matched keyword + complete item text) and the categorized change list;
+   - **Plugin self-update**: current/latest plugin version and status;
+   - **Settings**: the three switches below.
+7. **Three persisted switches** — check DSH on startup / check the plugin itself on startup / show details in the top banner (verbose or concise). Stored in `$DSH_HOME/update-check.json`.
+8. **Breaking-change grading** — semver (deterministic: major change, or minor change during 0.x) plus release-note keywords:
+   - **Strong signals** (`breaking change`, `破坏性更新`, `破坏…兼容`, etc.) → yellow warning "breaking update";
+   - **Weak signals** (`incompatible`, `migration`, `removed`, `deprecated`, `不兼容`, `迁移`, `移除`, etc.) → yellow warning "possibly breaking update", with the complete matched item shown for you to judge.
+   - Informational only — no install, no confirmation flow.
+9. **Network failure notice** — when GitHub is unreachable, the top banner shows "Cannot reach GitHub, check failed" with **Retry / Close**.
 
 ## Installation
 
@@ -64,7 +68,8 @@ The plugin is distributed as the npm package `dsh-update-check` (`plugin/` direc
 | Deployments without a fetch provider | ✅ | Node direct-connect fallback |
 | GitHub anonymous API rate limit | ⚠️ | 60 req/h/IP; one auto-check per page load plus on-demand manual checks are usually enough |
 | DSH version adaptation | ⚠️ | Slot names (`shell.overlay`, `settings.section`) verified against 0.1.0-rc.x; if the slot tree changes in future versions the UI simply won't mount (no crash), and Host checks keep working |
-| Breaking-change detection | ✅ | Semver detection is deterministic; release-note keywords are graded (strong → breaking; weak → yellow warning with matched keywords and snippets) |
+| Breaking-change detection | ✅ | Semver detection is deterministic; release-note keywords are graded (strong → breaking; weak → yellow warning with the complete matched item) |
+| Settings storage | ✅ | `$DSH_HOME/update-check.json` (atomic write; invalid content falls back to defaults); the three switches survive restarts |
 | Static plugin | ✅ | Auto-loads with DSH; no reinstall after DSH restart/update; Host has no `harness`, uses same-origin `webServer` HTTP (localhost only) |
 
 ## Troubleshooting

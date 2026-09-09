@@ -1,11 +1,199 @@
 // dsh-update-check — 静态 Host 半区(宿主 composition 插件)
-// 仅提供更新检测与提示,不提供安装(安装由用户手动执行):
-//   GET  /upd-check/api/check → 检查结果 JSON
-// 浏览器客户端(client bundle)通过同源 fetch 调用。
+// 纯提示型:检测 DSH 上游更新与插件自身更新,结构化解析上游改动,不提供安装。
+//   GET  /upd-check/api/check?dsh=1&plugin=1  → 检测结果(版本 + 上游改动分节 + 破坏性条目 + 设置)
+//   GET  /upd-check/api/settings              → 当前设置
+//   POST /upd-check/api/settings              → 写入部分设置(patch)
 // inject 声明 webServer 硬依赖:webServer 由 web-app 层提供,可能晚于本插件激活,
 // 声明注入可让 cordis 等服务就绪后再 apply(否则 ctx.get('webServer') 可能为 undefined,路由注册被跳过)。
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+
 export const inject = ['webServer']
-export { apply }
+export { apply, parseReleaseNotes, matchSignals, classifySectionKind, parseVersion, compareVersions, sanitizeSettings, isBreakingChange }
+
+const REPO = 'deepseek-ai/deepseek-harness'
+const PLUGIN_REPO = 'nmbzth/dsh_update_check'
+
+// 高置信度破坏性措辞(强信号)
+const STRONG_PATTERNS = [
+  /\bbreaking[- ]change[s]?\b/i,
+  /\b(?:breaking|breaks?|broke)\s+compatibilit\w*\b/i,
+  /\bnot\s+backward[- ]compatible\b/i,
+  /\bbackward[- ]incompatible\b/i,
+  /\bbc[- ]break[s]?\b/i,
+  /破坏性(?:更新|变更|修改|改动)/,
+  /破坏[^。\n]{0,12}兼容/,
+  /不向后兼容/,
+]
+// 宽泛措辞(弱信号):同样黄色预警,但由用户核实
+const WEAK_PATTERNS = [
+  /\bincompatible\b/i,
+  /\bmigration\b/i,
+  /\bmigrate\b/i,
+  /\bremoved\b/i,
+  /\bdeprecated\b/i,
+  /不兼容/,
+  /迁移/,
+  /移除/,
+  /不再支持/,
+]
+
+// release notes 分节 → 归一化分类
+const SECTION_KINDS = [
+  { key: 'features', zh: /新增功能|新功能/, en: /new features?|features?/i },
+  { key: 'fixes', zh: /问题修复|修复/, en: /bug fixes?|fixes?/i },
+  { key: 'improvements', zh: /体验优化|优化/, en: /improvements?/i },
+  { key: 'other', zh: /其他变更|其他/, en: /chores?|other changes?/i },
+  { key: 'sdk', zh: /^sdk$/i, en: /^sdk$/i },
+]
+
+const DEFAULT_SETTINGS = { checkOnStartup: true, checkPluginOnStartup: true, verboseBanner: false }
+const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS)
+
+function resolveDshHome() {
+  try {
+    const env = process.env && typeof process.env.DSH_HOME === 'string' ? process.env.DSH_HOME.trim() : ''
+    if (env) return env
+    return join(homedir(), '.dsh')
+  } catch (e) {
+    return '.dsh'
+  }
+}
+
+function settingsFilePath() {
+  return join(resolveDshHome(), 'update-check.json')
+}
+
+function sanitizeSettings(input) {
+  const out = {}
+  for (const key of SETTING_KEYS) {
+    out[key] = input && typeof input[key] === 'boolean' ? input[key] : DEFAULT_SETTINGS[key]
+  }
+  return out
+}
+
+async function readSettings() {
+  try {
+    const text = await readFile(settingsFilePath(), 'utf8')
+    return { settings: sanitizeSettings(JSON.parse(text)), error: null }
+  } catch (e) {
+    return {
+      settings: Object.assign({}, DEFAULT_SETTINGS),
+      error: e && e.code === 'ENOENT' ? null : (e && e.message ? String(e.message) : 'settings-read-failed'),
+    }
+  }
+}
+
+async function writeSettings(patch) {
+  const current = (await readSettings()).settings
+  const next = sanitizeSettings(Object.assign({}, current, patch || {}))
+  const file = settingsFilePath()
+  await mkdir(dirname(file), { recursive: true })
+  const tmp = file + '.tmp'
+  await writeFile(tmp, JSON.stringify(next, null, 2), 'utf8')
+  await rename(tmp, file)
+  return next
+}
+
+// 提取每条文本命中的关键词(强优先)
+function matchSignals(text) {
+  const hits = []
+  for (const re of STRONG_PATTERNS) {
+    const m = re.exec(text)
+    if (m) hits.push({ keyword: m[0], level: 'strong' })
+  }
+  for (const re of WEAK_PATTERNS) {
+    const m = re.exec(text)
+    if (m) hits.push({ keyword: m[0], level: 'weak' })
+  }
+  return hits
+}
+
+function classifySectionKind(title) {
+  const t = String(title || '').trim()
+  for (const kind of SECTION_KINDS) {
+    if (kind.zh.test(t) || kind.en.test(t)) return kind.key
+  }
+  return 'other'
+}
+
+function isChineseSectionTitle(title) {
+  return /[\u4e00-\u9fff]/.test(String(title || ''))
+}
+
+// 解析 release body 为分节条目;优先中文块,缺失回落英文块。
+function parseReleaseNotes(body) {
+  const lines = String(body || '').split(/\r?\n/)
+  const raw = []
+  let current = null
+  for (const line of lines) {
+    const h3 = /^\s*<h3[^>]*>(.*?)<\/h3>\s*$/.exec(line)
+    const md = /^\s*#{1,6}\s+(.+?)\s*$/.exec(line)
+    const title = h3 ? h3[1] : (md ? md[1] : null)
+    if (title !== null) {
+      current = { title: String(title).replace(/<[^>]*>/g, '').trim(), items: [] }
+      raw.push(current)
+      continue
+    }
+    const item = /^\s*[*-]\s+(.+?)\s*$/.exec(line)
+    if (item && current) current.items.push(String(item[1]).trim())
+  }
+  const hasChinese = raw.some((s) => isChineseSectionTitle(s.title))
+  const chosen = hasChinese ? raw.filter((s) => isChineseSectionTitle(s.title)) : raw
+  const byKey = new Map()
+  for (const section of chosen) {
+    if (section.items.length === 0) continue
+    const key = classifySectionKind(section.title)
+    const entry = byKey.get(key) || { key, title: section.title, items: [] }
+    for (const text of section.items) {
+      const hits = matchSignals(text)
+      entry.items.push(hits.length > 0 ? { text, breaking: hits[0] } : { text })
+    }
+    byKey.set(key, entry)
+  }
+  const order = ['features', 'fixes', 'improvements', 'other', 'sdk']
+  const sections = [...byKey.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))
+  return { sections, hasChinese }
+}
+
+function parseVersion(text) {
+  const m = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(text || '').trim())
+  if (!m) return null
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ? m[4].split('.') : null }
+}
+
+function compareVersions(a, b) {
+  if (a.major !== b.major) return a.major < b.major ? -1 : 1
+  if (a.minor !== b.minor) return a.minor < b.minor ? -1 : 1
+  if (a.patch !== b.patch) return a.patch < b.patch ? -1 : 1
+  if (!a.pre && !b.pre) return 0
+  if (!a.pre) return 1
+  if (!b.pre) return -1
+  const len = Math.max(a.pre.length, b.pre.length)
+  for (let i = 0; i < len; i++) {
+    const pa = a.pre[i]
+    const pb = b.pre[i]
+    if (pa === undefined) return -1
+    if (pb === undefined) return 1
+    if (pa === pb) continue
+    const na = /^\d+$/.test(pa)
+    const nb = /^\d+$/.test(pb)
+    if (na && nb) return Number(pa) < Number(pb) ? -1 : 1
+    if (na) return -1
+    if (nb) return 1
+    return pa < pb ? -1 : 1
+  }
+  return 0
+}
+
+function isBreakingChange(current, latest) {
+  if (!current || !latest) return false
+  if (current.major !== latest.major) return true
+  if (current.major === 0 && current.minor !== latest.minor) return true
+  return false
+}
 
 function apply(ctx) {
   const timer = ctx.get('timer')
@@ -14,100 +202,6 @@ function apply(ctx) {
   const fs = ctx.get('fs')
   const sandboxPolicy = ctx.get('sandboxPolicy')
   const webServer = ctx.get('webServer')
-
-  const REPO = 'deepseek-ai/deepseek-harness'
-
-  // 破坏性关键词分级:
-  // - STRONG:高置信度措辞 → 直接判破坏性(黄色预警 + 二次确认)
-  // - WEAK:宽泛的「不兼容 / 迁移 / 移除 / deprecated」等 → 同样黄色预警,
-  //   但向用户展示命中的关键词与原文片段,由用户核实是否真的破坏性。
-  const STRONG_PATTERNS = [
-    /\bbreaking[- ]change[s]?\b/i,
-    /\b(?:breaking|breaks?|broke)\s+compatibilit\w*\b/i,
-    /\bnot\s+backward[- ]compatible\b/i,
-    /\bbackward[- ]incompatible\b/i,
-    /\bbc[- ]break[s]?\b/i,
-    /破坏性(?:更新|变更|修改|改动)/,
-    /破坏[^。\n]{0,12}兼容/,
-    /不向后兼容/,
-  ]
-  const WEAK_PATTERNS = [
-    /\bincompatible\b/i,
-    /\bmigration\b/i,
-    /\bmigrate\b/i,
-    /\bremoved\b/i,
-    /\bdeprecated\b/i,
-    /不兼容/,
-    /迁移/,
-    /移除/,
-    /不再支持/,
-  ]
-
-  // 提取每个模式的首次命中及其前后上下文片段(供用户核实判定依据)
-  function extractSignals(body, patterns) {
-    const out = []
-    for (const re of patterns) {
-      const m = re.exec(String(body || ''))
-      if (!m) continue
-      const idx = m.index
-      const raw = m[0]
-      const start = Math.max(0, idx - 30)
-      const end = Math.min(body.length, idx + raw.length + 30)
-      out.push({ keyword: raw, context: body.slice(start, end).replace(/\s+/g, ' ').trim() })
-    }
-    return out
-  }
-
-  function classifySignals(body) {
-    const strong = extractSignals(body, STRONG_PATTERNS)
-    const weak = extractSignals(body, WEAK_PATTERNS)
-    return {
-      strong: strong.length > 0,
-      weak: weak.length > 0,
-      matches: [
-        ...strong.map((m) => Object.assign({}, m, { level: 'strong' })),
-        ...weak.map((m) => Object.assign({}, m, { level: 'weak' })),
-      ].slice(0, 8),
-    }
-  }
-
-  function parseVersion(text) {
-    const m = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(text || '').trim())
-    if (!m) return null
-    return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ? m[4].split('.') : null }
-  }
-
-  function compareVersions(a, b) {
-    if (a.major !== b.major) return a.major < b.major ? -1 : 1
-    if (a.minor !== b.minor) return a.minor < b.minor ? -1 : 1
-    if (a.patch !== b.patch) return a.patch < b.patch ? -1 : 1
-    if (!a.pre && !b.pre) return 0
-    if (!a.pre) return 1
-    if (!b.pre) return -1
-    const len = Math.max(a.pre.length, b.pre.length)
-    for (let i = 0; i < len; i++) {
-      const pa = a.pre[i]
-      const pb = b.pre[i]
-      if (pa === undefined) return -1
-      if (pb === undefined) return 1
-      if (pa === pb) continue
-      const na = /^\d+$/.test(pa)
-      const nb = /^\d+$/.test(pb)
-      if (na && nb) return Number(pa) < Number(pb) ? -1 : 1
-      if (na) return -1
-      if (nb) return 1
-      return pa < pb ? -1 : 1
-    }
-    return 0
-  }
-
-  // 破坏性更新判定(语义版本层面):major 变化,或 0.x 阶段 minor 变化(0.x 中 minor 即事实上的主版本)
-  function isBreakingChange(current, latest) {
-    if (!current || !latest) return false
-    if (current.major !== latest.major) return true
-    if (current.major === 0 && current.minor !== latest.minor) return true
-    return false
-  }
 
   function withTimeout(task, timeoutMs) {
     if (!timer) return task
@@ -126,9 +220,8 @@ function apply(ctx) {
     return '.'
   }
 
-  // 第二传输通道:subprocess 跑 node,直接请求官方 GitHub API(不依赖 web provider)。
-  // 先尝试标准 fetch(自动跟随重定向);失败(如 hosts 劫持导致证书错误)时,
-  // 用 dns.resolve4 取真实 IP + servername/Host 头绕过 hosts 直连,并手动跟随重定向、逐个 IP 重试。
+  // 第二传输通道:subprocess 跑 node 直连官方 GitHub API(不依赖 web provider);
+  // hosts 劫持环境下用 dns.resolve4 取真实 IP + servername/Host 头绕过。
   async function fetchTextViaNode(url, timeoutMs) {
     if (!subprocess) throw new Error('subprocess-unavailable')
     let nodePath = null
@@ -183,7 +276,7 @@ function apply(ctx) {
       cwd,
       stdio: {
         stdin: { data: script },
-        stdout: { maxBytes: 262144, spill: { maxBytes: 1048576 } },
+        stdout: { maxBytes: 1048576, spill: { maxBytes: 4194304 } },
         stderr: { maxBytes: 65536 },
       },
       graceMs: 3000,
@@ -215,72 +308,49 @@ function apply(ctx) {
     try {
       return await withTimeout(fetchTextViaNode(url, timeoutMs), timeoutMs)
     } catch (e) { errors.push(e) }
-    // 优先上报 http-*(GitHub 可达但非 2xx → no-release),否则抛传输错误(→ network)
     for (const e of errors) {
       if (e && /^http-/.test(String(e.message))) throw e
     }
     throw errors[errors.length - 1] || new Error('fetch-failed')
   }
 
-  // 官方发布说明中的破坏性信号检测(尽力而为,失败不阻塞)。
-  // 返回 { strong, weak, matches }——matches 为命中的关键词 + 原文片段,供 UI 展示判定依据。
-  async function fetchBreakingSignals() {
-    try {
-      const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases?per_page=1', 10000)
-      const arr = JSON.parse(text)
-      const body = Array.isArray(arr) && arr[0] ? String(arr[0].body || '') : ''
-      return classifySignals(body)
-    } catch (e) {
-      return { strong: false, weak: false, matches: [] }
-    }
-  }
-
-  async function fetchLatest() {
+  // 上游最新 release:版本 + 结构化改动分节 + 破坏性条目
+  async function fetchUpstream() {
+    let release = null
     let lastError = null
-    // 1) GitHub releases/latest JSON
     try {
-      const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases/latest', 10000)
-      const data = JSON.parse(text)
-      if (data && typeof data.tag_name === 'string' && data.tag_name) {
-        return { tag: data.tag_name, source: 'releases', signals: await fetchBreakingSignals() }
-      }
-      lastError = new Error('parse-no-tag')
+      const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases/latest', 12000)
+      release = JSON.parse(text)
     } catch (e) { lastError = e }
-    // 2) GitHub tags JSON
-    try {
-      const text = await fetchText('https://api.github.com/repos/' + REPO + '/tags', 10000)
-      const arr = JSON.parse(text)
-      if (Array.isArray(arr)) {
-        for (const item of arr) {
+    if (!release || typeof release.tag_name !== 'string' || !release.tag_name) {
+      try {
+        const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases?per_page=1', 12000)
+        const arr = JSON.parse(text)
+        release = Array.isArray(arr) && arr[0] ? arr[0] : null
+      } catch (e) { lastError = lastError || e }
+    }
+    if (!release || typeof release.tag_name !== 'string' || !release.tag_name) {
+      // 版本兜底:tags 通道(无 release notes)
+      try {
+        const text = await fetchText('https://api.github.com/repos/' + REPO + '/tags', 12000)
+        const arr = JSON.parse(text)
+        for (const item of Array.isArray(arr) ? arr : []) {
           if (item && typeof item.name === 'string' && parseVersion(item.name)) {
-            return { tag: item.name, source: 'tags', signals: await fetchBreakingSignals() }
+            return { tag: item.name, releaseUrl: null, publishedAt: null, sections: [], notesError: lastError ? String(lastError.message || lastError) : 'no-release-notes' }
           }
         }
-      }
-      lastError = new Error('parse-no-tags')
-    } catch (e) { lastError = e }
-    // 3) releases 页面 HTML
-    try {
-      const text = await fetchText('https://github.com/' + REPO + '/releases/latest', 10000)
-      const candidates = []
-      const titleMatch = text.match(/<title>([^<]*?)<\/title>/i)
-      if (titleMatch) {
-        const t = titleMatch[1].replace(/^Release\s+/i, '').replace(/\s*·.*$/, '').trim()
-        candidates.push(t)
-      }
-      const linkMatch = text.match(/\/releases\/tag\/([^"'<>\\\s]+)/)
-      if (linkMatch) candidates.push(linkMatch[1])
-      for (const c of candidates) {
-        if (parseVersion(c)) return { tag: c, source: 'html', signals: await fetchBreakingSignals() }
-      }
-      lastError = new Error('parse-no-html')
-    } catch (e) { lastError = e }
-    if (lastError) {
-      const msg = lastError.message || ''
-      if (/^(parse-|http-)/.test(msg)) throw new Error('no-release')
-      throw lastError
+      } catch (e) { lastError = lastError || e }
+      if (lastError) throw lastError
+      throw new Error('no-release')
     }
-    throw new Error('no-release')
+    const parsed = parseReleaseNotes(release.body || '')
+    return {
+      tag: release.tag_name,
+      releaseUrl: typeof release.html_url === 'string' ? release.html_url : null,
+      publishedAt: typeof release.published_at === 'string' ? release.published_at : null,
+      sections: parsed.sections,
+      notesError: null,
+    }
   }
 
   async function runShell(cmdline) {
@@ -314,8 +384,7 @@ function apply(ctx) {
     throw lastError || new Error('no-shell')
   }
 
-  async function detectLocalVersion() {
-    // 1) npm ls -g 直接读已装版本
+  async function detectLocalDshVersion() {
     try {
       const r = await runShell('npm ls -g @deepseek-ai/dsh --depth=0 --json')
       if (r.exitCode === 0 && r.stdout) {
@@ -324,7 +393,6 @@ function apply(ctx) {
         if (dep && typeof dep.version === 'string' && dep.version) return dep.version
       }
     } catch (e) { /* fall through */ }
-    // 2) npm root -g + fs 读 package.json
     try {
       const r = await runShell('npm root -g')
       if (r.exitCode === 0 && r.stdout) {
@@ -340,33 +408,98 @@ function apply(ctx) {
     return null
   }
 
-  async function handleCheck() {
+  // 插件自身版本:本地读自身 package.json,远端读仓库内 plugin/package.json
+  async function readLocalPluginVersion() {
     try {
-      const latest = await fetchLatest()
-      const latestParsed = parseVersion(latest.tag)
-      if (!latestParsed) return { ok: false, error: 'no-release', message: '无法解析远端版本 ' + latest.tag }
-      let current = null
-      try { current = await detectLocalVersion() } catch (e) { current = null }
-      const currentParsed = current ? parseVersion(current) : null
-      const updateAvailable = !!(currentParsed && latestParsed && compareVersions(currentParsed, latestParsed) < 0)
-      const breakingByVersion = !!(currentParsed && latestParsed && updateAvailable && isBreakingChange(currentParsed, latestParsed))
-      const signals = latest.signals || { strong: false, weak: false, matches: [] }
-      const breaking = breakingByVersion || signals.strong || signals.weak
-      return {
-        ok: true,
-        current: current || null,
-        latest: latest.tag,
-        updateAvailable,
-        breaking,
-        breakingReason: breakingByVersion ? 'version' : (signals.strong ? 'release-notes' : (signals.weak ? 'release-notes-weak' : null)),
-        breakingSignals: signals.matches || [],
-        checkedAt: Date.now(),
-        prerelease: !!latestParsed.pre,
-        localUnreadable: !currentParsed,
+      const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
+      const text = await readFile(pkgPath, 'utf8')
+      const data = JSON.parse(text)
+      return data && typeof data.version === 'string' ? data.version : null
+    } catch (e) {
+      return null
+    }
+  }
+
+  async function fetchRemotePluginVersion() {
+    try {
+      const text = await fetchText('https://api.github.com/repos/' + PLUGIN_REPO + '/contents/plugin/package.json', 12000)
+      const data = JSON.parse(text)
+      if (data && typeof data.content === 'string') {
+        const decoded = Buffer.from(data.content, data.encoding === 'base64' ? 'base64' : 'utf8').toString('utf8')
+        const pkg = JSON.parse(decoded)
+        if (pkg && typeof pkg.version === 'string') return pkg.version
       }
+      return null
+    } catch (e) {
+      return null
+    }
+  }
+
+  async function handleCheck(query) {
+    const scopeDsh = query.dsh !== '0'
+    const scopePlugin = query.plugin !== '0'
+    const { settings, error: settingsError } = await readSettings()
+    try {
+      let upstream = null
+      let dshError = null
+      if (scopeDsh) {
+        try {
+          upstream = await fetchUpstream()
+        } catch (e) {
+          dshError = e && e.message === 'no-release' ? 'no-release' : 'network'
+          upstream = null
+        }
+      }
+      let dsh = null
+      if (upstream) {
+        const latestParsed = parseVersion(upstream.tag)
+        let current = null
+        try { current = await detectLocalDshVersion() } catch (e) { current = null }
+        const currentParsed = current ? parseVersion(current) : null
+        const updateAvailable = !!(currentParsed && latestParsed && compareVersions(currentParsed, latestParsed) < 0)
+        const breakingByVersion = !!(currentParsed && latestParsed && updateAvailable && isBreakingChange(currentParsed, latestParsed))
+        const matches = []
+        for (const section of upstream.sections || []) {
+          for (const item of section.items || []) {
+            if (item.breaking) matches.push({ keyword: item.breaking.keyword, level: item.breaking.level, item: item.text, section: section.key })
+          }
+        }
+        const hasStrong = matches.some((m) => m.level === 'strong')
+        const hasWeak = matches.some((m) => m.level === 'weak')
+        dsh = {
+          current: current || null,
+          latest: upstream.tag,
+          version: latestParsed ? latestParsed.major + '.' + latestParsed.minor + '.' + latestParsed.patch + (latestParsed.pre ? '-' + latestParsed.pre.join('.') : '') : null,
+          updateAvailable,
+          prerelease: !!(latestParsed && latestParsed.pre),
+          localUnreadable: !currentParsed,
+          breaking: breakingByVersion || hasStrong || hasWeak,
+          breakingReason: breakingByVersion ? 'version' : (hasStrong ? 'release-notes' : (hasWeak ? 'release-notes-weak' : null)),
+          signals: matches,
+          sections: upstream.sections || [],
+          releaseUrl: upstream.releaseUrl,
+          publishedAt: upstream.publishedAt,
+          notesError: upstream.notesError,
+        }
+      }
+      let plugin = null
+      if (scopePlugin) {
+        const current = await readLocalPluginVersion()
+        const latest = await fetchRemotePluginVersion()
+        const cp = current ? parseVersion(current) : null
+        const lp = latest ? parseVersion(latest) : null
+        plugin = {
+          current: current || null,
+          latest: latest || null,
+          updateAvailable: !!(cp && lp && compareVersions(cp, lp) < 0),
+          repoUrl: 'https://github.com/' + PLUGIN_REPO,
+          error: latest ? null : 'remote-unavailable',
+        }
+      }
+      return { ok: true, checkedAt: Date.now(), dsh, dshError, plugin, settings, settingsError }
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'unknown'
-      return { ok: false, error: msg === 'no-release' ? 'no-release' : 'network', message: msg }
+      return { ok: false, error: msg === 'no-release' ? 'no-release' : 'network', message: msg, settings, settingsError }
     }
   }
 
@@ -375,15 +508,53 @@ function apply(ctx) {
     res.end(JSON.stringify(data))
   }
 
-  // 通过宿主 webServer 暴露 HTTP API(同源 fetch)。仅检测接口,不提供安装。
+  function readBody(req, limit) {
+    return new Promise((resolve, reject) => {
+      let size = 0
+      const chunks = []
+      req.on('data', (chunk) => {
+        size += chunk.length
+        if (size > limit) { reject(new Error('body-too-large')); req.destroy(); return }
+        chunks.push(chunk)
+      })
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      req.on('error', reject)
+    })
+  }
+
   if (webServer) {
     ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/upd-check/api/check',
       handler: async (req, res) => {
         if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, { ok: false, error: 'method' }); return }
-        const result = await handleCheck()
+        let query = {}
+        try {
+          const url = new URL(req.url || '/', 'http://127.0.0.1')
+          query = { dsh: url.searchParams.get('dsh'), plugin: url.searchParams.get('plugin') }
+        } catch (e) { /* default scope */ }
+        const result = await handleCheck(query)
         sendJson(res, 200, result)
+      },
+    }))
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/upd-check/api/settings',
+      handler: async (req, res) => {
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          const { settings, error } = await readSettings()
+          sendJson(res, 200, { ok: true, settings, error })
+          return
+        }
+        if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'method' }); return }
+        try {
+          const raw = await readBody(req, 16384)
+          const patch = raw ? JSON.parse(raw) : {}
+          const settings = await writeSettings(patch)
+          sendJson(res, 200, { ok: true, settings })
+        } catch (e) {
+          sendJson(res, 200, { ok: false, error: e && e.message ? String(e.message) : 'settings-write-failed' })
+        }
       },
     }))
   }
