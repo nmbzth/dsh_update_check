@@ -3,6 +3,9 @@
 # dsh_update_check
 
 > dsh_update_check 是一个 dsh 插件，能自动检查 dsharness 官方上游仓库比对差异并提示更新。
+```
+适用于0.1.2-rc1及以上版本
+```
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
