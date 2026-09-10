@@ -82,6 +82,15 @@ check(sClient.includes('locale.register(NS, "zh"') && sClient.includes('locale.r
 check(sClient.includes('locale.bind(NS)'), 'client 绑定 locale 翻译')
 check(sClient.includes('locale.subscribe'), 'client 响应语言切换重渲染')
 check(sClient.includes('fallbackTranslate'), 'locale 服务缺失时回退内置字典')
+// 回归防线:已是最新时不得残留改动/破坏性描述;插件挂载时必须清空上一次检查结果
+check(
+  sClient.includes('dsh && dsh.updateAvailable && dsh.signals') && sClient.includes('dsh && dsh.updateAvailable && dsh.sections'),
+  '设置页改动/破坏性描述受 updateAvailable 门控(已是最新不显示)'
+)
+check(
+  /store\.set\(\{\s*\n\s*phase: "idle",\s*\n\s*dsh: null,/.test(sClient),
+  '插件挂载时清空上一次检查结果(store 重置)'
+)
 {
   const zhBlock = sClient.slice(sClient.indexOf('zh: {'), sClient.indexOf('en: {'))
   const enBlock = sClient.slice(sClient.indexOf('en: {'), sClient.indexOf('// 回退翻译'))

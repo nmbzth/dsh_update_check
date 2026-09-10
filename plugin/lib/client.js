@@ -257,6 +257,21 @@ window.__ModuleLoader__.load({
 			const store = getStore();
 			const locale = ctx.get("locale");
 
+			// 每次插件挂载(宿主重启 / 插件热重载)都清空上一次的检查结果:
+			// store 是模块级单例,不清空会让设置页在新一轮检查完成前显示旧版本的改动描述。
+			store.set({
+				phase: "idle",
+				dsh: null,
+				plugin: null,
+				checkedAt: null,
+				errorKind: null,
+				message: null,
+				dshError: null,
+				settingsError: null,
+				expanded: false,
+				dismissedLatest: null
+			});
+
 			// 注册双语字典并绑定翻译;locale 服务缺失时回退内置中文
 			let translate = fallbackTranslate;
 			if (locale) {
@@ -518,22 +533,23 @@ window.__ModuleLoader__.load({
 								? react.createElement("span", { style: dsh.breaking ? STYLE.warnText : STYLE.okText },
 									t(dsh.breaking ? "badge.breakingUpdate" : "badge.update"))
 								: null,
-							dsh && dsh.releaseUrl
+							dsh && dsh.updateAvailable && dsh.releaseUrl
 								? react.createElement("a", { style: STYLE.link, href: dsh.releaseUrl, target: "_blank", rel: "noreferrer" }, t("btn.releaseNotes"))
 								: null
 						),
-						dsh && dsh.signals && dsh.signals.length > 0
+						// 仅在「确实有更新」时展示改动详情;已是最新时不残留上一版描述
+						dsh && dsh.updateAvailable && dsh.signals && dsh.signals.length > 0
 							? react.createElement("div", null,
 								react.createElement("div", { style: STYLE.warningText }, t("section.breakingFull")),
 								renderSignals(dsh)
 							)
 							: null,
-						dsh && dsh.sections && dsh.sections.length > 0
+						dsh && dsh.updateAvailable && dsh.sections && dsh.sections.length > 0
 							? react.createElement("div", null,
 								react.createElement("div", { style: STYLE.sectionTitle }, t("section.changes")),
 								renderSections(dsh, 0)
 							)
-							: (dsh ? react.createElement("div", { style: STYLE.dim }, t("section.none")) : null),
+							: (dsh && dsh.updateAvailable ? react.createElement("div", { style: STYLE.dim }, t("section.none")) : null),
 						state.dshError
 							? react.createElement("div", { style: STYLE.error }, t("error.upstreamFailed", { error: state.dshError }))
 							: null
