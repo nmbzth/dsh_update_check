@@ -142,6 +142,7 @@ check(sClient.includes('doSelfUpdate') && sClient.includes('action: "update"'), 
 check(sClient.includes('shortError') && sClient.includes('split("\\n")[0].slice(0, 200)'), 'client 失败原因单行限长显示')
 check(/onClick: \(\) => \{ doSelfUpdate\(\)\.catch/.test(sClient), 'client 热更新由点击触发')
 check(sClient.includes('restartRequired') && sClient.includes('plugin.updatedRestart'), 'client 区分热更新与需重启变更')
+check(sClient.includes('"engine.line"') && sClient.includes('state.engine.version'), 'client 显示运行中引擎版本(热换入自证)')
 {
   const auto = sClient.slice(sClient.indexOf('function scheduleAutoCheck'), sClient.indexOf('function renderSections'))
   check(auto.indexOf('doSelfUpdate') < 0, 'client 启动自动检查不触发自更新(仅提示)')

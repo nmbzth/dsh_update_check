@@ -77,6 +77,7 @@ window.__ModuleLoader__.load({
 				"plugin.updatedHot": "热更新完成:{from} → {to}(已生效,无需重启)",
 				"plugin.updatedRestart": "热更新完成:{from} → {to}(进程级变更,下次启动生效)",
 				"plugin.updateFailed": "热更新失败(已回滚):{error}",
+				"engine.line": "运行中引擎:{version}(契约 {contract})",
 				"value.unknown": "未知",
 				"value.unavailable": "无法获取",
 				"value.dash": "—",
@@ -156,6 +157,7 @@ window.__ModuleLoader__.load({
 				"plugin.updatedHot": "Hot update done: {from} → {to} (live now, no restart needed)",
 				"plugin.updatedRestart": "Hot update done: {from} → {to} (process-level change, applies on next start)",
 				"plugin.updateFailed": "Hot update failed (rolled back): {error}",
+				"engine.line": "Live engine: {version} (contract {contract})",
 				"value.unknown": "Unknown",
 				"value.unavailable": "Unavailable",
 				"value.dash": "—",
@@ -240,7 +242,8 @@ window.__ModuleLoader__.load({
 				dshError: null, settingsError: null,
 				checkedAt: null, errorKind: null, message: null,
 				expanded: false, bannerVisible: true, dismissedLatest: null,
-				updatePhase: "idle", updateMessage: null, updateResult: null
+				updatePhase: "idle", updateMessage: null, updateResult: null,
+				engine: null
 			};
 			const listeners = new Set();
 			return {
@@ -298,7 +301,8 @@ window.__ModuleLoader__.load({
 				dismissedLatest: null,
 				updatePhase: "idle",
 				updateMessage: null,
-				updateResult: null
+				updateResult: null,
+				engine: null
 			});
 
 			// 注册双语字典并绑定翻译;locale 服务缺失时回退内置中文
@@ -346,6 +350,7 @@ window.__ModuleLoader__.load({
 						settings: res.settings || null,
 						dshError: res.dshError || null,
 						settingsError: res.settingsError || null,
+						engine: res.engine || null,
 						checkedAt: res.checkedAt || Date.now(),
 						expanded: false
 					});
@@ -663,6 +668,11 @@ window.__ModuleLoader__.load({
 							: null,
 						state.updatePhase === "error"
 							? react.createElement("div", { style: STYLE.error }, t("plugin.updateFailed", { error: state.updateMessage || "" }))
+							: null,
+						// 运行中引擎版本:热更新换入后这里会立刻变成新版本 —— 免重启生效的自证
+						state.engine && state.engine.version
+							? react.createElement("div", { style: STYLE.dim },
+								t("engine.line", { version: state.engine.version, contract: state.engine.contract || "?" }))
 							: null
 					),
 
