@@ -1,12 +1,16 @@
-# release.ps1 — 一条命令发布本插件:契约门 → 提交 → API 推送 → 打 tag → 建 GitHub Release
+# release.ps1 — 发布本插件:契约门 → 提交 → API 推送 → 打 tag(+可选建 GitHub Release)
 #
-# 发布是热更新框架的内容源头:插件的自更新从 releases/latest 读取目标 tag,
-# 再用 contents API 取该 tag 下的 plugin/ 文件。因此每次发版都应打 tag + 建 release。
+# 发布策略(重要):
+#   * 每个版本都打 **tag** —— tag 是自更新抓取内容的锚点,必须存在;
+#   * **只有系列最终版本才建 GitHub Release** —— 中间版本发 Release 只会让人一头雾水,
+#     而插件自更新以 `releases/latest` 为内容源,最终版本发一次即可。
+#   因此:开发过程中反复执行(默认只打 tag);定稿时执行一次 -Final。
 #
 # 用法(仓库根执行):
-#   pwsh -NoProfile -File scripts/release.ps1
-#   pwsh -NoProfile -File scripts/release.ps1 -Notes "自定义发布说明"
-#   pwsh -NoProfile -File scripts/release.ps1 -SkipPush      # 只提交+打 tag,不推送
+#   pwsh -NoProfile -File scripts/release.ps1                 # 中间版本:提交 + 推送 + 打 tag
+#   pwsh -NoProfile -File scripts/release.ps1 -Final          # 定稿:额外建 GitHub Release
+#   pwsh -NoProfile -File scripts/release.ps1 -Final -Notes "自定义说明"
+#   pwsh -NoProfile -File scripts/release.ps1 -SkipPush       # 只提交,不推送/不打 tag
 #
 # 前置:plugin/package.json 的 version 已 bump,且 CHANGELOG.md 已写好该版本段落
 #      (段落内容会被抽出来当作 Release 说明)。
@@ -19,6 +23,7 @@ param(
   [string]$Repo = 'dsh_update_check',
   [string]$Branch = 'main',
   [string]$Notes = '',
+  [switch]$Final,
   [switch]$SkipPush
 )
 
@@ -91,20 +96,24 @@ try {
     "TAG=$tag created"
   }
 
-  # 6) 建 Release(幂等:已存在则跳过)
-  $releaseExists = $true
-  try { Api 'GET' "$API/releases/tags/$tag" $null | Out-Null } catch { $releaseExists = $false }
-  if ($releaseExists) {
-    "RELEASE=https://github.com/$Owner/$Repo/releases/tag/$tag (already-exists)"
+  # 6) 建 Release —— 仅系列最终版本(-Final);幂等:已存在则跳过
+  if (-not $Final) {
+    "RELEASE=skipped (中间版本只打 tag;定稿时加 -Final 发布 Release)"
   } else {
-    $rel = Api 'POST' "$API/releases" @{
-      tag_name   = $tag
-      name       = $tag
-      body       = $body
-      draft      = $false
-      prerelease = ($version -match '-')
+    $releaseExists = $true
+    try { Api 'GET' "$API/releases/tags/$tag" $null | Out-Null } catch { $releaseExists = $false }
+    if ($releaseExists) {
+      "RELEASE=https://github.com/$Owner/$Repo/releases/tag/$tag (already-exists)"
+    } else {
+      $rel = Api 'POST' "$API/releases" @{
+        tag_name   = $tag
+        name       = $tag
+        body       = $body
+        draft      = $false
+        prerelease = ($version -match '-')
+      }
+      "RELEASE=$($rel.html_url)"
     }
-    "RELEASE=$($rel.html_url)"
   }
   'DONE'
 } finally {

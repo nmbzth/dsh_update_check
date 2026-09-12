@@ -98,10 +98,12 @@ Any failure before or during step 6 leaves the disk untouched; a failure at step
 **Releasing (the content source)**
 
 ```powershell
-pwsh -NoProfile -File scripts/release.ps1
+pwsh -NoProfile -File scripts/release.ps1 -Final
 ```
 
-Runs both contract suites as a gate, extracts the version's CHANGELOG section as the release notes, commits, pushes, creates the tag and the GitHub Release (all idempotent). A published release is what the plugin's self-update consumes.
+Runs both contract suites as a gate, extracts the version's CHANGELOG section as the release notes, commits, pushes, and creates the tag plus the GitHub Release (all idempotent).
+
+Release policy: **every version gets a tag** — tags are what the self-update uses to fetch content — but **only the final version of a series gets a GitHub Release**. Publishing a Release for every intermediate version just confuses people. So run `scripts/release.ps1` (tag only) while a series is in progress, and add `-Final` once for the finished version. The plugin's self-update consumes `releases/latest`, i.e. exactly that final release.
 
 > On this machine `github.com` git transport is unavailable (connect timeout / SSL verification failure), so the push goes through the Git Data API (`scripts/push-via-api.ps1`); local and remote refs therefore stay **content-identical but SHA-divergent**, which is expected.
 
@@ -119,7 +121,7 @@ Runs both contract suites as a gate, extracts the version's CHANGELOG section as
 | Breaking-change detection | ✅ | Semver detection is deterministic; release-note keywords are graded (strong → breaking; weak → yellow warning with the complete matched item) |
 | Settings storage | ✅ | `$DSH_HOME/update-check.json` (atomic write; invalid content falls back to defaults); the three switches survive restarts |
 | Plugin hot update | ✅ | `lib/impl.js` + `lib/client.js` apply without a DSH restart; `lib/index.js` needs the next start (`restartRequired`); every attempt is validated first, backed up, and rolled back on failure |
-| Plugin hot update, no releases yet | ✅ | Falls back to `contents/plugin/package.json` on the default branch when the repo has no releases; create releases with `scripts/release.ps1` |
+| Plugin hot update, no releases yet | ⚠️ | The update source is `releases/latest`; with no Release at all it falls back to `contents/plugin/package.json` on the default branch (development channel). Intermediate versions get a tag only — see the release policy above |
 | Plugin hot update, offline | ⚠️ | Needs GitHub reachability (same three-level fallback as the check); nothing is written when the download fails |
 | Static plugin | ✅ | Auto-loads with DSH; no reinstall after DSH restart/update; Host has no `harness`, uses same-origin `webServer` HTTP (localhost only) |
 
@@ -143,7 +145,7 @@ Runs both contract suites as a gate, extracts the version's CHANGELOG section as
   - `node scripts/check-src.js` — syntax and source-contract checks (102 assertions; also run by CI);
   - `node scripts/check-runtime.mjs` — runtime contract checks: loads the real host half with a stub `ctx` in a temp sandbox and drives its real HTTP handlers, covering detection payloads, settings, engine contract, and the whole hot-update path including **zero-damage rollback** and both version-detection channels (62 assertions; also run by CI).
   - `node scripts/verify-real-selfupdate.mjs [package-dir]` — **opt-in, needs network**: copies a package into a temp dir, downgrades it to `0.0.1` with content drift, and performs a **real** self-update from the published GitHub Release, then asserts the files, the live engine version and the backup. Never touches the source directory; prints `SKIPPED` and exits 0 when GitHub is unreachable.
-- Release: `pwsh -NoProfile -File scripts/release.ps1` (bump `plugin/package.json`, write the CHANGELOG section, then run it).
+- Release: bump `plugin/package.json` + write the CHANGELOG section, then `pwsh -NoProfile -File scripts/release.ps1` (tag only) while iterating, and `... -Final` once for the finished version.
 - When you change the supervisor↔implementation contract, bump `IMPL_CONTRACT` in `lib/index.js` **and** `API_VERSION` in `lib/impl.js`; CI compares them.
 - Issues and PRs are welcome.
 

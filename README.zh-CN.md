@@ -98,10 +98,12 @@
 **发布（热更新的内容来源）**
 
 ```powershell
-pwsh -NoProfile -File scripts/release.ps1
+pwsh -NoProfile -File scripts/release.ps1 -Final
 ```
 
-以两套契约测试为门禁，抽取 CHANGELOG 中该版本段落作为 Release 说明，然后提交、推送、打 tag、建 GitHub Release（全部幂等）。发布出来的 Release 就是插件自更新消费的内容源。
+以两套契约测试为门禁，抽取 CHANGELOG 中该版本段落作为 Release 说明，然后提交、推送、打 tag，并建立 GitHub Release（全部幂等）。
+
+**发布策略**：**每个版本都打 tag**（tag 是自更新抓取内容的锚点），但**只有系列最终版本才建 GitHub Release** —— 中间版本发 Release 只会让人一头雾水。所以系列开发过程中执行 `scripts/release.ps1`（只打 tag），定稿时加一次 `-Final`。插件自更新消费的是 `releases/latest`，也就是那个最终发布版。
 
 > 本机 `github.com` 的 git 直连不可用（连接超时 / SSL 校验失败），推送走 Git Data API（`scripts/push-via-api.ps1`），因此本地与远端的 ref 会**内容一致、SHA 分叉**，这是预期行为。
 
@@ -119,7 +121,7 @@ pwsh -NoProfile -File scripts/release.ps1
 | 破坏性更新判定 | ✅ | semver 判定确定性可靠；发布说明关键词分级（强信号直接判破坏性；弱信号黄色预警并展示完整命中条目供核实） |
 | 设置存储 | ✅ | `$DSH_HOME/update-check.json`（原子写；内容损坏回退默认）；三个开关重启后仍生效 |
 | 插件热更新 | ✅ | `lib/impl.js` + `lib/client.js` 免重启生效；`lib/index.js` 需下次启动（`restartRequired`）；每次尝试都先校验、再备份、失败回滚 |
-| 仓库尚无 Release 时的热更新 | ✅ | 回落读取默认分支的 `contents/plugin/package.json`；用 `scripts/release.ps1` 建立 Release 后即走 tag |
+| 仓库尚无 Release 时的热更新 | ⚠️ | 自更新以 `releases/latest` 为内容源；完全没有 Release 时回落默认分支的 `contents/plugin/package.json`（开发通道）。中间版本只打 tag，见上面的发布策略 |
 | 离线时的热更新 | ⚠️ | 需要能连上 GitHub（与检查共用三级回退）；下载失败时不写任何文件 |
 | 静态插件 | ✅ | 随 DSH 启动自动加载，重启/更新 DSH 后无需重装；Host 无 `harness`，走 `webServer` HTTP 接口（同源，仅本机监听） |
 
@@ -143,7 +145,7 @@ pwsh -NoProfile -File scripts/release.ps1
   - `node scripts/check-src.js` —— 语法与源码契约检查（102 条断言，CI 同样执行）；
   - `node scripts/check-runtime.mjs` —— 运行期契约检查：在临时沙箱里用桩 `ctx` 装载真实 host 半区并驱动其真实 HTTP handler，覆盖检测载荷、设置读写、引擎契约与热更新全链路（含**失败零损伤回滚**与两条版本检测渠道），62 条断言，CI 同样执行；
   - `node scripts/verify-real-selfupdate.mjs [包目录]` —— **可选，需联网**：把包复制到临时目录、降到 `0.0.1` 并制造内容漂移，然后**真的**从已发布的 GitHub Release 自我更新一次，再断言文件、运行中引擎版本与备份。全程不动源目录；GitHub 不可达时输出 `SKIPPED` 并以 0 退出。
-- 发布：`pwsh -NoProfile -File scripts/release.ps1`（先 bump `plugin/package.json`、写好 CHANGELOG 段落，再执行）。
+- 发布：先 bump `plugin/package.json` 并写好 CHANGELOG 段落，然后 `pwsh -NoProfile -File scripts/release.ps1`（迭代期只打 tag），定稿时加 `-Final` 发布 Release。
 - 改动「监督者 ↔ 实现」契约时，需同步 bump `lib/index.js` 的 `IMPL_CONTRACT` 与 `lib/impl.js` 的 `API_VERSION`；CI 会比对两者是否一致。
 - 欢迎提交 Issue / PR。
 
