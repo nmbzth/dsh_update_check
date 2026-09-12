@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.0.3 — 修复：热更新在校验环节必定失败（shell 引号改写）
+
+- **根因**：候选 `client.js` 的语法校验走的是 `runShell('node --check "<暂存路径>"')`，而 `runShell` 把整条命令行作为**单个 argv 元素**交给 `cmd.exe /d /s /c`。DSH 的 subprocess provider 会对该元素再引用一次，`/s` 又剥掉外层引号，于是 node 收到的实际参数是 `cwd\"绝对路径"` —— 实测报 `Cannot find module 'C:\Users\zhou\deepseek-harness\"C:\Users\...'`。**该校验自上线起在真实环境从未生效**，任何一次热更新都会在第一个文件上失败（且因校验在替换之前，磁盘零损伤）。
+- **修复**：改为**进程内解析** `new Function(file.text)` —— 不起子进程、不经 shell、无引号可改写，与 CI 的 `check-src.js` 对 client bundle 的检查同一口径（该 bundle 是普通脚本，无 import/export）。顺带去掉一个失败模式（`node` 不可用）。
+- **修复（可读性）**：失败原因**单行化 + 限长**（宿主 240 字符、界面 200 字符）——此前会把整段 node 堆栈倒进界面与历史。
+- **修复（impl 装载）**：impl 校验失败时同样单行化，并保留 `impl-*` 语义前缀（契约失配仍报 `impl-contract-mismatch:99`）。
+- **测试盲区（已补）**：原运行期桩用 `new Function` **代替**真进程，比现实宽松，因而宽恕了这个 bug。现在桩对任何经 shell 的 `--check` **一律返回失败**（`SHELL-SYNTAX-CHECK-FORBIDDEN`），并新增场景「远端 client 语法坏 → 必须由**进程内**校验拒绝（`remote-client-syntax`）、且磁盘零改动」；源码契约增加否定断言（不得再出现 `node --check`）。
+- 断言：源码 95 → **99**，运行期 56 → **62**。
+- 说明：本次修的是**监督者**（`lib/index.js`），属进程级基础设施 → **需要一次 DSH 重启**才生效（这正是文档里标注的边界：热更新能换 `impl.js`/`client.js`，换不了执行更新的那段代码）。
+
 ## v2.0.2 — 区分「GitHub 限流」与「网络不通」
 
 - **修复（错误分类）**:上游返回 **403/429** 时此前一律归类 `network`，界面说「无法连接 GitHub，检查失败」——把**匿名 API 限流（60 次/小时）**误报成网络故障，用户重试也无用。现在单独归类 `rate-limit`：顶部横幅提示「GitHub 拒绝请求：匿名 API 限流（60 次/小时）已用尽，稍后重试即可」，设置页「DSH 更新」卡片给出同样的专用文案。中英双语。

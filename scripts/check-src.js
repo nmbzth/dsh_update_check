@@ -20,6 +20,8 @@ const sClient = read('plugin/lib/client.js')
 const sPkg = JSON.parse(read('plugin/package.json'))
 // 监督者:自更新安装段(校验「先验证后替换」与回滚路径的先后关系)
 const sInstall = sHost.slice(sHost.indexOf('async function performSelfUpdate'), sHost.indexOf('// ---------- HTTP ----------'))
+// 监督者代码体(去行注释):用于「不得再经 shell 校验」这类否定断言,避免被注释里的说明文字误伤
+const sHostCode = sHost.replace(/^\s*\/\/.*$/gm, '')
 
 // 1) 包结构
 check(sPkg.name === 'dsh-update-check', '包名 = dsh-update-check')
@@ -95,7 +97,12 @@ check(!/^import\s.*impl\.js/m.test(sHost), 'host 不静态依赖 impl(需可换�
 check(sHost.includes("'?v=' + encodeURIComponent"), 'host 按版本 cache-bust 导入(?v=)')
 check(sHost.includes('swapEngine') && sHost.includes('enginePromise = Promise.resolve(next)'), 'host 原子换入新引擎')
 check(sHost.includes('stageAndValidate') && sHost.includes("join(STAGE_DIR"), 'host 先落 .stage 校验')
-check(sHost.includes('node --check'), 'host 用 node --check 校验候选 client 语法')
+// 回归防线:候选校验一律进程内完成,不得再经 shell/子进程
+// (曾被 cmd.exe 引号改写打成 Cannot find module 'cwd\"绝对路径',校验在真实环境静默失效)
+check(sHost.includes('new Function(file.text)'), 'host 进程内解析候选 client(不经 shell)')
+check(!sHostCode.includes('node --check'), 'host 不用 node --check 起子进程校验')
+check(!/runShell\([^)]*--check/.test(sHostCode), 'host 校验命令不含引号拼接的 shell 调用')
+check(sHost.includes("split('\\n')[0].slice(0, 240)"), 'host 失败原因单行化限长(不倒堆栈)')
 check(sInstall.includes('stageAndValidate') && sInstall.indexOf('stageAndValidate') < sInstall.indexOf('await rename('), 'host 校验通过后才替换线上文件')
 check(sInstall.includes('copyFile(item.backup, item.live)'), 'host 安装失败即回滚(备份还原)')
 check(sInstall.includes('engine-swap-failed'), 'host 换引擎失败即回滚并保留旧引擎')
@@ -132,6 +139,7 @@ check(sClient.includes('saveSettings') && sClient.includes('API_SETTINGS'), 'cli
 // 插件热更新 UI:仅点击触发,不静默自动更新
 check(sClient.includes('API_SELF_UPDATE') && sClient.includes('/upd-check/api/self-update'), 'client 调用 self-update 接口')
 check(sClient.includes('doSelfUpdate') && sClient.includes('action: "update"'), 'client 提供手动热更新入口')
+check(sClient.includes('shortError') && sClient.includes('split("\\n")[0].slice(0, 200)'), 'client 失败原因单行限长显示')
 check(/onClick: \(\) => \{ doSelfUpdate\(\)\.catch/.test(sClient), 'client 热更新由点击触发')
 check(sClient.includes('restartRequired') && sClient.includes('plugin.updatedRestart'), 'client 区分热更新与需重启变更')
 {

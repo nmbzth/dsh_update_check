@@ -36,6 +36,7 @@ const pkg = JSON.parse(await readSrc('plugin/package.json'))
 const IMPL_CONTRACT = Number(/IMPL_CONTRACT = (\d+)/.exec(sIndex)[1])
 const nextVersion = String(pkg.version).replace(/(\d+)$/, (m) => String(Number(m) + 1))
 const nextVersion2 = String(nextVersion).replace(/(\d+)$/, (m) => String(Number(m) + 1))
+const nextVersion3 = String(nextVersion2).replace(/(\d+)$/, (m) => String(Number(m) + 1))
 
 const RELEASE_BODY = [
   '<h3>新增功能</h3>',
@@ -130,17 +131,13 @@ const fakeWebServer = {
     return () => routes.delete(spec.path)
   },
 }
-// subprocess:node --check 用真实解析代替进程,其余命令返回固定结果(不真的起进程)
+// subprocess:只服务 npm 探测;任何经 shell 的 --check 一律失败 ——
+// 候选 client 的语法校验必须进程内完成(曾因 cmd.exe 引号改写在真实环境静默失效,
+// 当时正是因为桩「宽恕」了它才漏过)
 function fakeSubprocess() {
   const runLine = (cmdline) => {
-    const m = /--check\s+"?([^"]+)"?/.exec(cmdline)
-    if (m) {
-      try {
-        new Function(require$read(m[1]))
-        return { exitCode: 0, stdout: '', stderr: '' }
-      } catch (e) {
-        return { exitCode: 1, stdout: '', stderr: String(e && e.message) }
-      }
+    if (/--check/.test(cmdline)) {
+      return { exitCode: 1, stdout: '', stderr: 'SHELL-SYNTAX-CHECK-FORBIDDEN' }
     }
     if (/npm ls -g/.test(cmdline)) {
       return { exitCode: 0, stdout: JSON.stringify({ dependencies: { '@deepseek-ai/dsh': { version: '0.1.0-rc.7' } } }), stderr: '' }
@@ -159,8 +156,6 @@ function fakeSubprocess() {
     },
   }
 }
-// 桩里的同步读文件(仅测试辅助)
-function require$read(p) { return readFileSync(p, 'utf8') }
 
 // web 服务保持同一个对象(host 半区在 apply 时就捕获了它),fetch 可被替换
 let offline = false
@@ -314,6 +309,20 @@ const r4 = await call('/upd-check/api/check', 'GET')
 check(r4.ok === true && r4.engine.version === nextVersion, '失败后运行中的引擎仍为 ' + nextVersion)
 const history2 = JSON.parse(await readFile(join(box, 'update-check-history.json'), 'utf8'))
 check(Array.isArray(history2) && history2.length === 2 && history2[0].ok === false, '失败也记入历史(可追溯)')
+
+// ⑧b 失败零损伤:远端 client 语法坏 → 进程内解析拒绝(不经 shell),磁盘不动
+const beforeClient = await boxRead('lib/client.js')
+remote.pluginVersion = nextVersion3
+remote.implText = remoteImplHot
+remote.clientText = remoteClientHot + '\nfunction ('   // 故意破坏语法
+const badClient = await call('/upd-check/api/self-update', 'POST', JSON.stringify({ action: 'update' }))
+check(badClient.ok === false, '远端 client 语法坏时自更新失败')
+check(String(badClient.message || '').indexOf('remote-client-syntax') === 0, '失败原因来自进程内语法校验:' + String(badClient.message || '').slice(0, 80))
+check(String(badClient.message || '').indexOf('SHELL-SYNTAX-CHECK-FORBIDDEN') < 0, '未走 shell 语法校验(引号改写防线)')
+check(JSON.parse(await boxRead('package.json')).version === nextVersion, '失败时 package.json 未被替换')
+check((await boxRead('lib/client.js')) === beforeClient, '失败时 client.js 未被替换')
+const history3 = JSON.parse(await readFile(join(box, 'update-check-history.json'), 'utf8'))
+check(Array.isArray(history3) && history3.length === 3 && history3[0].ok === false, '第二次失败也留痕')
 
 // ⑨ 网络不可达:检测降级为 dshError=network,而不是抛异常/假成功
 check(/releases\/latest/.test(fetchLog[0] || ''), '检测确实走上游 API')

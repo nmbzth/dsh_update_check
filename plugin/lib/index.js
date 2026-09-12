@@ -475,11 +475,22 @@ function apply(ctx) {
         if (typeof pkg.version !== 'string' || !parseVersionLoose(pkg.version)) throw new Error('remote-version-invalid')
       } else if (/client\.js$/.test(file.path)) {
         if (!file.text.includes('__ModuleLoader__')) throw new Error('remote-client-invalid')
-        const r = await runShell('node --check "' + stagePath + '"')
-        if (r.exitCode !== 0) throw new Error('remote-client-syntax:' + String(r.stderr || '').trim().slice(0, 160))
+        // 进程内解析,不经 shell/子进程:早先用 `node --check "<路径>"` 经 cmd.exe /d /s /c 时
+        // 外层引号被改写(实测报 Cannot find module 'cwd\"绝对路径'),该校验在真实环境从未生效。
+        // 本 bundle 是普通脚本(无 import/export),与 CI 的 check-src.js 同一口径。
+        try {
+          new Function(file.text)
+        } catch (e) {
+          throw new Error('remote-client-syntax:' + String((e && e.message) || e).split('\n')[0].slice(0, 200))
+        }
       } else if (/impl\.js$/.test(file.path)) {
         if (!/API_VERSION\s*=\s*\d+/.test(file.text) || !file.text.includes('createEngine')) throw new Error('remote-impl-invalid')
-        await importImpl(pathToFileURL(stagePath).href + '?stage=' + Date.now())
+        try {
+          await importImpl(pathToFileURL(stagePath).href + '?stage=' + Date.now())
+        } catch (e) {
+          const msg = String((e && e.message) || e).split('\n')[0].slice(0, 200)
+          throw new Error(msg.indexOf('impl-') === 0 ? msg : 'remote-impl-load:' + msg)
+        }
       } else if (/index\.js$/.test(file.path)) {
         if (!file.text.includes('webServer.register') || !/inject\s*=\s*\[/.test(file.text)) throw new Error('remote-supervisor-invalid')
       }
@@ -685,8 +696,8 @@ function apply(ctx) {
       const result = await performSelfUpdate({ force })
       sendJson(res, 200, Object.assign({ action: 'update' }, result))
     } catch (e) {
-      const message = e && e.message ? String(e.message) : 'self-update-failed'
-      // 任何一次自更新尝试都留痕(成功由 performSelfUpdate 内部记录)
+      // 单行化 + 限长:失败原因要给用户看,不能把堆栈原样倒进界面与历史
+      const message = String((e && e.message) || 'self-update-failed').split('\n')[0].slice(0, 240)
       await pushHistory({ at: Date.now(), ok: false, action: 'update', error: message })
       sendJson(res, 200, { ok: false, action: 'update', error: 'self-update-failed', message })
     }

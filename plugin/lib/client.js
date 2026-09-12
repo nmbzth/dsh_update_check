@@ -364,6 +364,9 @@ window.__ModuleLoader__.load({
 				}
 			}
 
+			// 失败原因压成一行限长文本,避免把堆栈倒进界面
+			const shortError = (value) => String(value || "").split("\n")[0].slice(0, 200);
+
 			// 插件自身热更新:只由用户点击触发(绝不静默自动更新);
 			// 宿主侧先落 .stage 校验、再原子替换、失败自动回滚,这里只呈现结果。
 			async function doSelfUpdate() {
@@ -373,7 +376,7 @@ window.__ModuleLoader__.load({
 					if (!res || res.ok !== true) {
 						store.set({
 							updatePhase: "error",
-							updateMessage: (res && (res.message || res.error)) || "self-update-failed"
+							updateMessage: shortError((res && (res.message || res.error)) || "self-update-failed")
 						});
 						return;
 					}
@@ -385,7 +388,7 @@ window.__ModuleLoader__.load({
 					store.set({ updatePhase: "done", updateResult: res, updateMessage: null });
 					await doCheck({ dsh: true, plugin: true, source: "manual" });
 				} catch (e) {
-					store.set({ updatePhase: "error", updateMessage: e && e.message ? String(e.message) : "self-update-failed" });
+					store.set({ updatePhase: "error", updateMessage: shortError(e && e.message ? String(e.message) : "self-update-failed") });
 				}
 			}
 

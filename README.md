@@ -140,8 +140,8 @@ Runs both contract suites as a gate, extracts the version's CHANGELOG section as
 
 - Plugin source: `plugin/` directory = the npm package `dsh-update-check` (`lib/index.js` supervisor + `lib/impl.js` hot-swappable implementation + `lib/client.js` browser bundle).
 - Local validation:
-  - `node scripts/check-src.js` — syntax and source-contract checks (95 assertions; also run by CI);
-  - `node scripts/check-runtime.mjs` — runtime contract checks: loads the real host half with a stub `ctx` in a temp sandbox and drives its real HTTP handlers, covering detection payloads, settings, engine contract, and the whole hot-update path including **zero-damage rollback** and both version-detection channels (56 assertions; also run by CI).
+  - `node scripts/check-src.js` — syntax and source-contract checks (99 assertions; also run by CI);
+  - `node scripts/check-runtime.mjs` — runtime contract checks: loads the real host half with a stub `ctx` in a temp sandbox and drives its real HTTP handlers, covering detection payloads, settings, engine contract, and the whole hot-update path including **zero-damage rollback** and both version-detection channels (62 assertions; also run by CI).
   - `node scripts/verify-real-selfupdate.mjs [package-dir]` — **opt-in, needs network**: copies a package into a temp dir, downgrades it to `0.0.1` with content drift, and performs a **real** self-update from the published GitHub Release, then asserts the files, the live engine version and the backup. Never touches the source directory; prints `SKIPPED` and exits 0 when GitHub is unreachable.
 - Release: `pwsh -NoProfile -File scripts/release.ps1` (bump `plugin/package.json`, write the CHANGELOG section, then run it).
 - When you change the supervisor↔implementation contract, bump `IMPL_CONTRACT` in `lib/index.js` **and** `API_VERSION` in `lib/impl.js`; CI compares them.

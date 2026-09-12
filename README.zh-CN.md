@@ -140,8 +140,8 @@ pwsh -NoProfile -File scripts/release.ps1
 
 - 插件本体：`plugin/` 目录 = npm 包 `dsh-update-check`（`lib/index.js` 监督者 + `lib/impl.js` 可热插拔实现 + `lib/client.js` 浏览器 bundle）。
 - 本地校验：
-  - `node scripts/check-src.js` —— 语法与源码契约检查（95 条断言，CI 同样执行）；
-  - `node scripts/check-runtime.mjs` —— 运行期契约检查：在临时沙箱里用桩 `ctx` 装载真实 host 半区并驱动其真实 HTTP handler，覆盖检测载荷、设置读写、引擎契约与热更新全链路（含**失败零损伤回滚**与两条版本检测渠道），56 条断言，CI 同样执行；
+  - `node scripts/check-src.js` —— 语法与源码契约检查（99 条断言，CI 同样执行）；
+  - `node scripts/check-runtime.mjs` —— 运行期契约检查：在临时沙箱里用桩 `ctx` 装载真实 host 半区并驱动其真实 HTTP handler，覆盖检测载荷、设置读写、引擎契约与热更新全链路（含**失败零损伤回滚**与两条版本检测渠道），62 条断言，CI 同样执行；
   - `node scripts/verify-real-selfupdate.mjs [包目录]` —— **可选，需联网**：把包复制到临时目录、降到 `0.0.1` 并制造内容漂移，然后**真的**从已发布的 GitHub Release 自我更新一次，再断言文件、运行中引擎版本与备份。全程不动源目录；GitHub 不可达时输出 `SKIPPED` 并以 0 退出。
 - 发布：`pwsh -NoProfile -File scripts/release.ps1`（先 bump `plugin/package.json`、写好 CHANGELOG 段落，再执行）。
 - 改动「监督者 ↔ 实现」契约时，需同步 bump `lib/index.js` 的 `IMPL_CONTRACT` 与 `lib/impl.js` 的 `API_VERSION`；CI 会比对两者是否一致。
