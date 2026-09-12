@@ -71,6 +71,11 @@ check(sImpl.includes('classifySectionKind') && sImpl.includes("'features'") && s
 check(sImpl.includes('matchSignals'), 'impl 逐条破坏性信号检测')
 check(sImpl.includes('STRONG_PATTERNS') && sImpl.includes('WEAK_PATTERNS'), 'impl 分级关键词表')
 check(sImpl.includes('isBreakingChange'), 'impl 含语义版本破坏性判定')
+// 本机 DSH 版本检测:模块解析优先 + npm 全局回落,并自报来源
+check(sImpl.includes("createRequire") && sImpl.includes("'@deepseek-ai/dsh/package.json'"), 'impl 走模块系统解析本机 DSH')
+check(sImpl.indexOf("require_.resolve('@deepseek-ai/dsh/package.json')") < sImpl.indexOf('await detectLocalDshVersion()'), 'impl 模块解析优先于 npm 全局探测')
+check(sImpl.includes("source: 'module-resolution'") && sImpl.includes("source: 'npm-global'"), 'impl 回报版本检测来源')
+check(sImpl.includes('sourcePath'), 'impl 回报命中的安装路径')
 check(!/\bctx\b/.test(sImpl.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')) && !sImpl.includes('harness.'), 'impl 不触碰 ctx(纯逻辑,可热插拔)')
 {
   const contractHost = /IMPL_CONTRACT = (\d+)/.exec(sHost)
@@ -132,6 +137,7 @@ check(sClient.includes('restartRequired') && sClient.includes('plugin.updatedRes
 }
 check(sClient.includes('renderSections') && sClient.includes('"section.features"') && sClient.includes('"section.fixes"'), 'client 展示改动分类(字典化标题)')
 check(sClient.includes('renderSignals'), 'client 展示完整命中描述')
+check(sClient.includes('sourceKey') && sClient.includes('source.line') && sClient.includes('"source.module"') && sClient.includes('"source.npm"'), 'client 展示本机版本来源(诊断)')
 check(sClient.includes('"section.breakingFull": "破坏性相关描述（完整）："'), '设置页完整命中描述文案在字典中')
 check(sClient.includes('const DICT = {') && sClient.includes('zh: {') && sClient.includes('en: {'), 'client 内置 zh/en 字典')
 check(sClient.includes('locale.register(NS, "zh"') && sClient.includes('locale.register(NS, "en"'), 'client 注册两种语言字典')

@@ -43,6 +43,10 @@ window.__ModuleLoader__.load({
 				"row.status": "状态",
 				"row.currentPlugin": "当前插件版本",
 				"row.latestPlugin": "最新插件版本",
+				"source.line": "本机版本来源:{source}{path}",
+				"source.module": "模块解析",
+				"source.npm": "npm 全局探测",
+				"source.unknown": "未知",
 				"btn.checkNow": "立即检查",
 				"btn.releaseNotes": "查看发布说明",
 				"status.idle": "未检查",
@@ -116,6 +120,10 @@ window.__ModuleLoader__.load({
 				"row.status": "Status",
 				"row.currentPlugin": "Current plugin version",
 				"row.latestPlugin": "Latest plugin version",
+				"source.line": "Local version detected via {source}{path}",
+				"source.module": "module resolution",
+				"source.npm": "npm global probe",
+				"source.unknown": "unknown",
 				"btn.checkNow": "Check now",
 				"btn.releaseNotes": "Release notes",
 				"status.idle": "Not checked",
@@ -538,6 +546,8 @@ window.__ModuleLoader__.load({
 				}[state.phase] || state.phase;
 				const fmtTime = (value) => value ? new Date(value).toLocaleString() : t("value.dash");
 				const unknown = t("value.unknown");
+				// 本机版本来源(Diagnostics):模块解析 / npm 全局探测 —— 版本读错时一眼看出读的是哪份安装
+				const sourceKey = (s) => s === "module-resolution" ? "source.module" : (s === "npm-global" ? "source.npm" : "source.unknown");
 
 				const rows = [
 					[t("row.currentDsh"), (dsh && dsh.current) || unknown],
@@ -565,6 +575,14 @@ window.__ModuleLoader__.load({
 								react.createElement("span", null, r[1])
 							))
 						),
+						// 诊断行:本机版本是哪条渠道读出来的(版本读错时一眼定位)
+						dsh && dsh.current
+							? react.createElement("div", { style: STYLE.dim },
+								t("source.line", {
+									source: t(sourceKey(dsh.source)),
+									path: dsh.sourcePath ? "(" + dsh.sourcePath + ")" : ""
+								}))
+							: null,
 						react.createElement("div", { style: STYLE.actions },
 							react.createElement("button", {
 								style: Object.assign({}, STYLE.actionBtn, STYLE.btnPrimary),

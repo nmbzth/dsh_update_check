@@ -15,7 +15,7 @@
 5. **可持续热更新框架（针对本插件自身）**：host 半区拆成**稳定监督者** + **可热插拔实现**两层，检测/解析逻辑换版本**无需重启 DSH**；设置页提供**手动**「热更新插件」按钮（绝不静默、绝不自动）。详见[热更新](#热更新)。
 6. **顶部横幅两态**：**简略**（一行「发现更新：DSH X → Y」+「详情 / 稍后」）或**详细**（直接展开详情），由开关控制；**无自动消失计时器**；点「稍后」后同版本不再弹出，直到出现更新版本。
 7. **独立设置页**：设置区**独立的「↑ 检查更新」页**（与「通用设置 / 模型 / 插件」同级），三个卡片：
-   - **DSH 更新**：当前/最新版本、发布时间、上次检查、状态、「立即检查」、发布说明链接、**完整破坏性命中描述**（关键词 + 完整条目原文）与改动分类列表；
+   - **DSH 更新**：当前/最新版本、发布时间、上次检查、状态、「立即检查」、发布说明链接、**完整破坏性命中描述**（关键词 + 完整条目原文）、改动分类列表，以及一行淡色诊断文字（本机版本是从哪条渠道读出来的：模块解析 + 路径，或 npm 全局探测）；
    - **插件自身更新**：当前/最新插件版本、状态与**热更新按钮**；
    - **设置**：下列三个开关。
 8. **三个持久化开关**：每次启动检查 DSH 更新 / 每次启动检查插件自身更新 / 顶部窗口显示描述细节（详细或简略），存于 `$DSH_HOME/update-check.json`。
@@ -49,8 +49,8 @@
 
 | 半区 | 职责 |
 | --- | --- |
-| Host 监督者（`plugin/lib/index.js`） | 进程级基础设施：本地 DSH 版本读取（`npm ls -g` → `npm root -g` + 读 package.json）、三级网络回退、设置持久化、HTTP 路由，以及**热换入 / 自更新引擎**。 |
-| Host 实现（`plugin/lib/impl.js`） | 可热插拔的检测逻辑：发布说明分节解析、改动分类、破坏性分级、版本比对；以 `API_VERSION` / `IMPL_CONTRACT` 契约与监督者绑定。 |
+| Host 监督者（`plugin/lib/index.js`） | 进程级基础设施：三级网络回退、设置持久化、HTTP 路由，以及**热换入 / 自更新引擎**。 |
+| Host 实现（`plugin/lib/impl.js`） | 可热插拔的检测逻辑：本机 DSH 版本检测（模块解析 → npm 全局回落，并自报命中渠道）、发布说明分节解析、改动分类、破坏性分级、版本比对；以 `API_VERSION` / `IMPL_CONTRACT` 契约与监督者绑定。 |
 | Client（`plugin/lib/client.js`） | `shell.overlay` 顶部横幅 + 设置区独立「↑ 检查更新」页（`settings.section`）；展示更新提醒、破坏性风险详情（含命中关键词片段）、网络错误与热更新按钮。 |
 | 通信 | `webServer` HTTP 路由（`/upd-check/api/check`、`/upd-check/api/settings`、`/upd-check/api/self-update`）+ 同源 fetch |
 
@@ -111,7 +111,7 @@ pwsh -NoProfile -File scripts/release.ps1
 | --- | --- | --- |
 | Windows / macOS / Linux | ✅ | shell 双回退（`cmd.exe` → `sh`），node 解析双回退（`node` → `node.exe`）；无硬编码路径 |
 | npm 全局安装的 DSH | ✅ | 本地版本通过 `npm ls -g @deepseek-ai/dsh` / `npm root -g` 读取 |
-| pnpm / bun / git clone 安装 | ⚠️ | 本地版本可能读不到，横幅显示「最新版本 X（无法读取本地版本）」；远端检查不受影响 |
+| pnpm / bun / git clone 安装 | ✅ | 本机版本改由 Node 模块解析读取（`require.resolve('@deepseek-ai/dsh/package.json')`，约 6ms，不起 shell），非 npm 布局同样覆盖；`npm ls -g` 保留为回落，设置页会显示实际命中的渠道 |
 | hosts 劫持（Steamcommunity302 等） | ✅ | 内置 DNS 直连绕过 |
 | 未挂载 fetch provider 的部署 | ✅ | node 直连通道兜底 |
 | GitHub 匿名 API 限流 | ⚠️ | 60 次/小时/IP；每次页面加载自动检查 1 次，手动检查按需触发，一般足够 |
@@ -139,8 +139,8 @@ pwsh -NoProfile -File scripts/release.ps1
 
 - 插件本体：`plugin/` 目录 = npm 包 `dsh-update-check`（`lib/index.js` 监督者 + `lib/impl.js` 可热插拔实现 + `lib/client.js` 浏览器 bundle）。
 - 本地校验：
-  - `node scripts/check-src.js` —— 语法与源码契约检查（86 条断言，CI 同样执行）；
-  - `node scripts/check-runtime.mjs` —— 运行期契约检查：在临时沙箱里用桩 `ctx` 装载真实 host 半区并驱动其真实 HTTP handler，覆盖检测载荷、设置读写、引擎契约与热更新全链路（含**失败零损伤回滚**），47 条断言，CI 同样执行；
+  - `node scripts/check-src.js` —— 语法与源码契约检查（91 条断言，CI 同样执行）；
+  - `node scripts/check-runtime.mjs` —— 运行期契约检查：在临时沙箱里用桩 `ctx` 装载真实 host 半区并驱动其真实 HTTP handler，覆盖检测载荷、设置读写、引擎契约与热更新全链路（含**失败零损伤回滚**与两条版本检测渠道），54 条断言，CI 同样执行；
   - `node scripts/verify-real-selfupdate.mjs [包目录]` —— **可选，需联网**：把包复制到临时目录、降到 `0.0.1` 并制造内容漂移，然后**真的**从已发布的 GitHub Release 自我更新一次，再断言文件、运行中引擎版本与备份。全程不动源目录；GitHub 不可达时输出 `SKIPPED` 并以 0 退出。
 - 发布：`pwsh -NoProfile -File scripts/release.ps1`（先 bump `plugin/package.json`、写好 CHANGELOG 段落，再执行）。
 - 改动「监督者 ↔ 实现」契约时，需同步 bump `lib/index.js` 的 `IMPL_CONTRACT` 与 `lib/impl.js` 的 `API_VERSION`；CI 会比对两者是否一致。

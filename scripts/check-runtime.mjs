@@ -322,6 +322,20 @@ const r5 = await call('/upd-check/api/check', 'GET')
 offline = false
 check(r5.ok === true && r5.dsh === null && r5.dshError === 'network', '网络不可达时降级为 dshError=network')
 
+// ⑩ 本机版本检测渠道:模块解析优先于 npm 全局探测,并自报来源
+check(r1.dsh && r1.dsh.source === 'npm-global', '沙箱无 dsh 包时回落 npm 全局探测(实际 ' + (r1.dsh && r1.dsh.source) + ')')
+check(r1.dsh && r1.dsh.current === '0.1.0-rc.7', '回落渠道读到 npm 桩版本')
+await mkdir(join(box, 'node_modules/@deepseek-ai/dsh'), { recursive: true })
+await writeFile(join(box, 'node_modules/@deepseek-ai/dsh/package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '9.9.9-planted' }, null, 2), 'utf8')
+const r6 = await call('/upd-check/api/check', 'GET')
+check(r6.dsh && r6.dsh.source === 'module-resolution', '植入 dsh 包后命中模块解析(实际 ' + (r6.dsh && r6.dsh.source) + ')')
+check(r6.dsh && r6.dsh.current === '9.9.9-planted', '模块解析优先于 npm 全局探测(读到 ' + (r6.dsh && r6.dsh.current) + ')')
+check(r6.dsh && typeof r6.dsh.sourcePath === 'string' && r6.dsh.sourcePath.indexOf('node_modules') > 0, '回报命中的安装路径(' + (r6.dsh && r6.dsh.sourcePath) + ')')
+check(r6.dsh && r6.dsh.updateAvailable === false, '本地 9.9.9 高于上游 → 判定无更新')
+await rm(join(box, 'node_modules'), { recursive: true, force: true })
+const r7 = await call('/upd-check/api/check', 'GET')
+check(r7.dsh && r7.dsh.source === 'npm-global' && r7.dsh.updateAvailable === true, '移除植入包后回落且恢复「有更新」判定')
+
 // 清理
 for (const dispose of disposers) {
   try { if (typeof dispose === 'function') dispose() } catch (e) { /* ignore */ }

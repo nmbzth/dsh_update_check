@@ -5,6 +5,8 @@
 // 因此:检测/展示逻辑的演进放这里;进程级基础设施(服务、设置、网络回退、路由)放监督者。
 //
 // 契约:API_VERSION 必须等于监督者的 IMPL_CONTRACT;createEngine(deps) 返回 { check }。
+import { createRequire } from 'node:module'
+import { readFile } from 'node:fs/promises'
 
 export const API_VERSION = 2
 
@@ -150,6 +152,34 @@ export function createEngine(deps) {
   const { fetchText, detectLocalDshVersion, readLocalPluginVersion, fetchRemotePluginVersion, fetchPluginRelease, repos } = deps
   const REPO = (repos && repos.dsh) || 'deepseek-ai/deepseek-harness'
 
+  // 本机 DSH 版本:先走模块系统解析——它找到的是「按 Node 解析规则真正会加载的那份安装」,
+  // 实测 6ms 且对 pnpm / bun / 本地克隆等布局同样有效;失败再回落到监督者的 npm 全局探测
+  // (881ms,且需要 shell + PATH + npm 可用)。source 字段回报实际命中的渠道,便于自证。
+  // ponytail: 暂不做 argv 入口自证——模块解析在本部署已直指运行中的那份安装,
+  //           等真出现「本地安装遮蔽全局安装」的实际案例再加第三渠道。
+  async function resolveDshViaModule() {
+    try {
+      const require_ = createRequire(String(import.meta.url).split('?')[0])
+      const pkgPath = require_.resolve('@deepseek-ai/dsh/package.json')
+      const data = JSON.parse(await readFile(pkgPath, 'utf8'))
+      if (data && typeof data.version === 'string' && data.version) {
+        return { version: data.version, source: 'module-resolution', path: pkgPath }
+      }
+    } catch (e) { /* 落回 npm 探测 */ }
+    return null
+  }
+
+  async function resolveDshLocal() {
+    const viaModule = await resolveDshViaModule()
+    if (viaModule) return viaModule
+    try {
+      const version = await detectLocalDshVersion()
+      return version ? { version, source: 'npm-global' } : null
+    } catch (e) {
+      return null
+    }
+  }
+
   // 上游最新 release:版本 + 结构化改动分节 + 破坏性条目
   async function fetchUpstream() {
     let release = null
@@ -213,8 +243,8 @@ export function createEngine(deps) {
       let dsh = null
       if (upstream) {
         const latestParsed = parseVersion(upstream.tag)
-        let current = null
-        try { current = await detectLocalDshVersion() } catch (e) { current = null }
+        const local = await resolveDshLocal()
+        const current = local ? local.version : null
         const currentParsed = current ? parseVersion(current) : null
         const updateAvailable = !!(currentParsed && latestParsed && compareVersions(currentParsed, latestParsed) < 0)
         const breakingByVersion = !!(currentParsed && latestParsed && updateAvailable && isBreakingChange(currentParsed, latestParsed))
@@ -228,6 +258,8 @@ export function createEngine(deps) {
         const hasWeak = matches.some((m) => m.level === 'weak')
         dsh = {
           current: current || null,
+          source: local ? local.source : null,
+          sourcePath: local && local.path ? local.path : null,
           latest: upstream.tag,
           version: latestParsed ? latestParsed.major + '.' + latestParsed.minor + '.' + latestParsed.patch + (latestParsed.pre ? '-' + latestParsed.pre.join('.') : '') : null,
           updateAvailable,

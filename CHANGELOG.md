@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.1 — 本机 DSH 版本检测提速 150×、覆盖非 npm 布局,并自报来源
+
+- **修复（检测渠道）**:本机 DSH 版本原先只靠 `npm ls -g @deepseek-ai/dsh` 起 shell 探测——实测 **881ms**,且依赖 shell/PATH/npm,对 **pnpm / bun / 本地克隆**安装读不到（README 里那条 ⚠️ 就是它，表现为「无法读取本地版本」或读到另一份安装）。现在**先走模块系统解析**（`createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json')`）：命中的是「按 Node 解析规则真正会被加载的那份安装」，实测 **6ms**，无需 shell，并对上述布局同样有效；失败才回落到原 npm 全局探测。
+- **新增（来源自证）**:`/check` 的 `dsh` 载荷新增 `source`（`module-resolution` / `npm-global` / null）与 `sourcePath`；设置页「DSH 更新」卡片新增一行淡色诊断文字（`本机版本来源：模块解析(<绝对路径>)`），版本读错时一眼看出读的是哪份安装。中英双语。
+- 契约不变（`API_VERSION` 仍为 2）：本版只改 `lib/impl.js` 与界面文案，**属可热更新范围**，不重启 DSH 即可生效。
+- CI/自测新增断言：impl 含模块解析渠道与回落顺序、来源字段回报；运行期测试新增两个场景——沙箱内植入 `node_modules/@deepseek-ai/dsh`（应命中 `module-resolution` 并优先于 npm 桩）、移除后应回落 `npm-global`。
+
 ## v2.0.0 — 插件自身可持续热更新框架
 
 - **新增（分层架构）**:host 半区拆成两层——`lib/index.js` 为**监督者**（进程级基础设施：服务、设置、三级网络回退、HTTP 路由、热更新引擎），`lib/impl.js` 为**可热插拔实现**（release notes 解析、改动分类、破坏性分级、版本比对），两者以 `API_VERSION` / `IMPL_CONTRACT` 显式契约绑定。检测逻辑此后演进**无需重启 DSH**。

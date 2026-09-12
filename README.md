@@ -15,7 +15,7 @@
 5. **Sustainable hot-update framework (for this plugin)** — the host half is split into a **stable supervisor** and a **hot-swappable implementation**, so the detection/parsing logic can be replaced without restarting DSH; the settings page has a **manual** "Hot-update plugin" button (never silent, never automatic). See [Hot update](#hot-update).
 6. **Two-state top banner** — **concise** (one line "Update available: DSH X → Y" + Details / Later) or **verbose** (details expanded immediately), controlled by a switch; **no auto-dismiss**; "Later" remembers the version so it does not pop up again until a newer version appears.
 7. **Dedicated settings page** — a standalone **"↑ Check for updates"** page in Settings (same level as General / Models / Plugins), with three cards:
-   - **DSH update**: current/latest version, publish time, last check, status, "Check now", release-notes link, **full breaking-change descriptions** (matched keyword + complete item text) and the categorized change list;
+   - **DSH update**: current/latest version, publish time, last check, status, "Check now", release-notes link, **full breaking-change descriptions** (matched keyword + complete item text), the categorized change list, and a dim diagnostics line showing **how the local version was detected** (module resolution + path, or npm global probe);
    - **Plugin self-update**: current/latest plugin version, status and the **hot-update button**;
    - **Settings**: the three switches below.
 8. **Three persisted switches** — check DSH on startup / check the plugin itself on startup / show details in the top banner (verbose or concise). Stored in `$DSH_HOME/update-check.json`.
@@ -49,8 +49,8 @@ The plugin is distributed as the npm package `dsh-update-check` (`plugin/` direc
 
 | Side | Responsibility |
 | --- | --- |
-| Host — supervisor (`plugin/lib/index.js`) | Process-level infrastructure: DSH version detection (`npm ls -g` → `npm root -g` + read package.json), three-level network fallback, settings persistence, HTTP routes, and the **hot-swap / self-update engine**. |
-| Host — implementation (`plugin/lib/impl.js`) | Hot-swappable detection logic: release-notes parsing, section classification, graded breaking-change signals, version comparison. Bound to the supervisor by the `API_VERSION` / `IMPL_CONTRACT` contract. |
+| Host — supervisor (`plugin/lib/index.js`) | Process-level infrastructure: three-level network fallback, settings persistence, HTTP routes, and the **hot-swap / self-update engine**. |
+| Host — implementation (`plugin/lib/impl.js`) | Hot-swappable detection logic: local DSH version detection (module resolution → npm global fallback, reporting the channel it used), release-notes parsing, section classification, graded breaking-change signals, version comparison. Bound to the supervisor by the `API_VERSION` / `IMPL_CONTRACT` contract. |
 | Client (`plugin/lib/client.js`) | `shell.overlay` top banner + the dedicated Settings page (`settings.section`); shows update reminders, breaking-risk details with matched keyword snippets, network errors, and the hot-update button. |
 | Communication | `webServer` HTTP routes (`/upd-check/api/check`, `/upd-check/api/settings`, `/upd-check/api/self-update`) + same-origin fetch |
 
@@ -111,7 +111,7 @@ Runs both contract suites as a gate, extracts the version's CHANGELOG section as
 | --- | --- | --- |
 | Windows / macOS / Linux | ✅ | Shell fallback chain (`cmd.exe` → `sh`); node resolution tries `node` → `node.exe`; no hard-coded paths |
 | DSH installed via npm globally | ✅ | Local version read via `npm ls -g @deepseek-ai/dsh` / `npm root -g` |
-| pnpm / bun / git clone installs | ⚠️ | Local version may be unreadable; banner shows "Latest version X (cannot read local version)"; remote check is unaffected |
+| pnpm / bun / git clone installs | ✅ | Local version is resolved through Node's module system (`require.resolve('@deepseek-ai/dsh/package.json')`, ~6 ms, no shell), so non-npm layouts are covered; `npm ls -g` remains the fallback and the settings page shows which channel answered |
 | hosts hijacking (Steamcommunity302 etc.) | ✅ | Built-in DNS direct-connect bypass |
 | Deployments without a fetch provider | ✅ | Node direct-connect fallback |
 | GitHub anonymous API rate limit | ⚠️ | 60 req/h/IP; one auto-check per page load plus on-demand manual checks are usually enough |
@@ -139,8 +139,8 @@ Runs both contract suites as a gate, extracts the version's CHANGELOG section as
 
 - Plugin source: `plugin/` directory = the npm package `dsh-update-check` (`lib/index.js` supervisor + `lib/impl.js` hot-swappable implementation + `lib/client.js` browser bundle).
 - Local validation:
-  - `node scripts/check-src.js` — syntax and source-contract checks (86 assertions; also run by CI);
-  - `node scripts/check-runtime.mjs` — runtime contract checks: loads the real host half with a stub `ctx` in a temp sandbox and drives its real HTTP handlers, covering detection payloads, settings, engine contract, and the whole hot-update path including **zero-damage rollback** (47 assertions; also run by CI).
+  - `node scripts/check-src.js` — syntax and source-contract checks (91 assertions; also run by CI);
+  - `node scripts/check-runtime.mjs` — runtime contract checks: loads the real host half with a stub `ctx` in a temp sandbox and drives its real HTTP handlers, covering detection payloads, settings, engine contract, and the whole hot-update path including **zero-damage rollback** and both version-detection channels (54 assertions; also run by CI).
   - `node scripts/verify-real-selfupdate.mjs [package-dir]` — **opt-in, needs network**: copies a package into a temp dir, downgrades it to `0.0.1` with content drift, and performs a **real** self-update from the published GitHub Release, then asserts the files, the live engine version and the backup. Never touches the source directory; prints `SKIPPED` and exits 0 when GitHub is unreachable.
 - Release: `pwsh -NoProfile -File scripts/release.ps1` (bump `plugin/package.json`, write the CHANGELOG section, then run it).
 - When you change the supervisor↔implementation contract, bump `IMPL_CONTRACT` in `lib/index.js` **and** `API_VERSION` in `lib/impl.js`; CI compares them.
