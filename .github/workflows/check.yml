@@ -17,3 +17,5 @@ jobs:
           node-version: 20
       - name: Run source checks
         run: node scripts/check-src.js
+      - name: Run runtime contract checks
+        run: node scripts/check-runtime.mjs

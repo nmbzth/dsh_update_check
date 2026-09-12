@@ -1,53 +1,39 @@
-// dsh-update-check — 静态 Host 半区(宿主 composition 插件)
-// 纯提示型:检测 DSH 上游更新与插件自身更新,结构化解析上游改动,不提供安装。
-//   GET  /upd-check/api/check?dsh=1&plugin=1  → 检测结果(版本 + 上游改动分节 + 破坏性条目 + 设置)
-//   GET  /upd-check/api/settings              → 当前设置
-//   POST /upd-check/api/settings              → 写入部分设置(patch)
+// dsh-update-check — 静态 Host 半区:监督者(supervisor)
+//
+// 分层(可持续热更新的关键):
+//   lib/index.js  ← 监督者(本文件,进程级基础设施:服务、设置、网络回退、路由、热更新引擎)
+//   lib/impl.js   ← 可热插拔实现(检测/解析逻辑;换版本只需重新 import,不重启 DSH)
+//   lib/client.js ← UI 半区(文件变更即由 dsh-client-hmr 推新 rev,免刷新)
+//
+// 路由:
+//   GET  /upd-check/api/check                → 检测(DSH 更新 + 插件自身更新 + 设置)
+//   GET  /upd-check/api/settings             → 当前设置 | POST 写入部分设置
+//   GET  /upd-check/api/self-update          → 插件热更新状态(引擎版本/契约/历史)
+//   POST /upd-check/api/self-update          → 执行插件热更新({action:'update'|'reload', force})
+//
+// 热更新边界(诚实标注):
+//   impl.js / client.js → 免重启生效;index.js(本文件)属进程级基础设施 → 写入后下次启动生效。
 // inject 声明 webServer 硬依赖:webServer 由 web-app 层提供,可能晚于本插件激活,
 // 声明注入可让 cordis 等服务就绪后再 apply(否则 ctx.get('webServer') 可能为 undefined,路由注册被跳过)。
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rename, copyFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const inject = ['webServer']
-export { apply, parseReleaseNotes, matchSignals, classifySectionKind, parseVersion, compareVersions, sanitizeSettings, isBreakingChange }
+export { apply, resolveDshHome, sanitizeSettings }
 
 const REPO = 'deepseek-ai/deepseek-harness'
 const PLUGIN_REPO = 'nmbzth/dsh_update_check'
 
-// 高置信度破坏性措辞(强信号)
-const STRONG_PATTERNS = [
-  /\bbreaking[- ]change[s]?\b/i,
-  /\b(?:breaking|breaks?|broke)\s+compatibilit\w*\b/i,
-  /\bnot\s+backward[- ]compatible\b/i,
-  /\bbackward[- ]incompatible\b/i,
-  /\bbc[- ]break[s]?\b/i,
-  /破坏性(?:更新|变更|修改|改动)/,
-  /破坏[^。\n]{0,12}兼容/,
-  /不向后兼容/,
-]
-// 宽泛措辞(弱信号):同样黄色预警,但由用户核实
-const WEAK_PATTERNS = [
-  /\bincompatible\b/i,
-  /\bmigration\b/i,
-  /\bmigrate\b/i,
-  /\bremoved\b/i,
-  /\bdeprecated\b/i,
-  /不兼容/,
-  /迁移/,
-  /移除/,
-  /不再支持/,
-]
-
-// release notes 分节 → 归一化分类
-const SECTION_KINDS = [
-  { key: 'features', zh: /新增功能|新功能/, en: /new features?|features?/i },
-  { key: 'fixes', zh: /问题修复|修复/, en: /bug fixes?|fixes?/i },
-  { key: 'improvements', zh: /体验优化|优化/, en: /improvements?/i },
-  { key: 'other', zh: /其他变更|其他/, en: /chores?|other changes?/i },
-  { key: 'sdk', zh: /^sdk$/i, en: /^sdk$/i },
-]
+// 监督者与实现之间的版本契约:impl.js 的 API_VERSION 必须严格等于它
+const IMPL_CONTRACT = 2
+// 自更新覆盖的文件(相对 plugin/ 目录);顺序即安装顺序
+const PATCH_FILES = ['lib/client.js', 'lib/impl.js', 'lib/index.js', 'package.json']
+// 安装后免重启即生效的文件
+const HOT_FILES = ['lib/client.js', 'lib/impl.js']
+const HISTORY_LIMIT = 20
 
 const DEFAULT_SETTINGS = { checkOnStartup: true, checkPluginOnStartup: true, verboseBanner: false }
 const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS)
@@ -64,6 +50,10 @@ function resolveDshHome() {
 
 function settingsFilePath() {
   return join(resolveDshHome(), 'update-check.json')
+}
+
+function historyFilePath() {
+  return join(resolveDshHome(), 'update-check-history.json')
 }
 
 function sanitizeSettings(input) {
@@ -86,85 +76,30 @@ async function readSettings() {
   }
 }
 
+async function writeJsonAtomic(file, data) {
+  await mkdir(dirname(file), { recursive: true })
+  const tmp = file + '.tmp'
+  await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
+  await rename(tmp, file)
+  return data
+}
+
 async function writeSettings(patch) {
   const current = (await readSettings()).settings
   const next = sanitizeSettings(Object.assign({}, current, patch || {}))
-  const file = settingsFilePath()
-  await mkdir(dirname(file), { recursive: true })
-  const tmp = file + '.tmp'
-  await writeFile(tmp, JSON.stringify(next, null, 2), 'utf8')
-  await rename(tmp, file)
+  await writeJsonAtomic(settingsFilePath(), next)
   return next
 }
 
-// 提取每条文本命中的关键词(强优先)
-function matchSignals(text) {
-  const hits = []
-  for (const re of STRONG_PATTERNS) {
-    const m = re.exec(text)
-    if (m) hits.push({ keyword: m[0], level: 'strong' })
-  }
-  for (const re of WEAK_PATTERNS) {
-    const m = re.exec(text)
-    if (m) hits.push({ keyword: m[0], level: 'weak' })
-  }
-  return hits
-}
-
-function classifySectionKind(title) {
-  const t = String(title || '').trim()
-  for (const kind of SECTION_KINDS) {
-    if (kind.zh.test(t) || kind.en.test(t)) return kind.key
-  }
-  return 'other'
-}
-
-function isChineseSectionTitle(title) {
-  return /[\u4e00-\u9fff]/.test(String(title || ''))
-}
-
-// 解析 release body 为分节条目;优先中文块,缺失回落英文块。
-function parseReleaseNotes(body) {
-  const lines = String(body || '').split(/\r?\n/)
-  const raw = []
-  let current = null
-  for (const line of lines) {
-    const h3 = /^\s*<h3[^>]*>(.*?)<\/h3>\s*$/.exec(line)
-    const md = /^\s*#{1,6}\s+(.+?)\s*$/.exec(line)
-    const title = h3 ? h3[1] : (md ? md[1] : null)
-    if (title !== null) {
-      current = { title: String(title).replace(/<[^>]*>/g, '').trim(), items: [] }
-      raw.push(current)
-      continue
-    }
-    const item = /^\s*[*-]\s+(.+?)\s*$/.exec(line)
-    if (item && current) current.items.push(String(item[1]).trim())
-  }
-  const hasChinese = raw.some((s) => isChineseSectionTitle(s.title))
-  const chosen = hasChinese ? raw.filter((s) => isChineseSectionTitle(s.title)) : raw
-  const byKey = new Map()
-  for (const section of chosen) {
-    if (section.items.length === 0) continue
-    const key = classifySectionKind(section.title)
-    const entry = byKey.get(key) || { key, title: section.title, items: [] }
-    for (const text of section.items) {
-      const hits = matchSignals(text)
-      entry.items.push(hits.length > 0 ? { text, breaking: hits[0] } : { text })
-    }
-    byKey.set(key, entry)
-  }
-  const order = ['features', 'fixes', 'improvements', 'other', 'sdk']
-  const sections = [...byKey.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))
-  return { sections, hasChinese }
-}
-
-function parseVersion(text) {
+// 版本解析/比较(监督者自带,不依赖 impl —— impl 损坏时监督者仍须可用)
+function parseVersionLoose(text) {
   const m = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(text || '').trim())
   if (!m) return null
   return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), pre: m[4] ? m[4].split('.') : null }
 }
 
-function compareVersions(a, b) {
+function compareVersionsLoose(a, b) {
+  if (!a || !b) return 0
   if (a.major !== b.major) return a.major < b.major ? -1 : 1
   if (a.minor !== b.minor) return a.minor < b.minor ? -1 : 1
   if (a.patch !== b.patch) return a.patch < b.patch ? -1 : 1
@@ -188,11 +123,10 @@ function compareVersions(a, b) {
   return 0
 }
 
-function isBreakingChange(current, latest) {
-  if (!current || !latest) return false
-  if (current.major !== latest.major) return true
-  if (current.major === 0 && current.minor !== latest.minor) return true
-  return false
+// git blob sha1:与 GitHub contents API 返回的 sha 同口径,用于精确判定文件是否变化
+function gitBlobSha(text) {
+  const buf = Buffer.from(text, 'utf8')
+  return createHash('sha1').update('blob ' + buf.length + '\u0000').update(buf).digest('hex')
 }
 
 function apply(ctx) {
@@ -202,6 +136,18 @@ function apply(ctx) {
   const fs = ctx.get('fs')
   const sandboxPolicy = ctx.get('sandboxPolicy')
   const webServer = ctx.get('webServer')
+
+  const LIB_DIR = dirname(fileURLToPath(import.meta.url))
+  const PKG_DIR = dirname(LIB_DIR)
+  const STAGE_DIR = join(LIB_DIR, '.stage')
+  const BAK_DIR = join(LIB_DIR, '.bak')
+
+  function log(level, message) {
+    try {
+      const target = ctx.logger
+      if (target && typeof target[level] === 'function') target[level]('dsh-update-check: ' + message)
+    } catch (e) { /* 日志失败不影响功能 */ }
+  }
 
   function withTimeout(task, timeoutMs) {
     if (!timer) return task
@@ -314,45 +260,6 @@ function apply(ctx) {
     throw errors[errors.length - 1] || new Error('fetch-failed')
   }
 
-  // 上游最新 release:版本 + 结构化改动分节 + 破坏性条目
-  async function fetchUpstream() {
-    let release = null
-    let lastError = null
-    try {
-      const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases/latest', 12000)
-      release = JSON.parse(text)
-    } catch (e) { lastError = e }
-    if (!release || typeof release.tag_name !== 'string' || !release.tag_name) {
-      try {
-        const text = await fetchText('https://api.github.com/repos/' + REPO + '/releases?per_page=1', 12000)
-        const arr = JSON.parse(text)
-        release = Array.isArray(arr) && arr[0] ? arr[0] : null
-      } catch (e) { lastError = lastError || e }
-    }
-    if (!release || typeof release.tag_name !== 'string' || !release.tag_name) {
-      // 版本兜底:tags 通道(无 release notes)
-      try {
-        const text = await fetchText('https://api.github.com/repos/' + REPO + '/tags', 12000)
-        const arr = JSON.parse(text)
-        for (const item of Array.isArray(arr) ? arr : []) {
-          if (item && typeof item.name === 'string' && parseVersion(item.name)) {
-            return { tag: item.name, releaseUrl: null, publishedAt: null, sections: [], notesError: lastError ? String(lastError.message || lastError) : 'no-release-notes' }
-          }
-        }
-      } catch (e) { lastError = lastError || e }
-      if (lastError) throw lastError
-      throw new Error('no-release')
-    }
-    const parsed = parseReleaseNotes(release.body || '')
-    return {
-      tag: release.tag_name,
-      releaseUrl: typeof release.html_url === 'string' ? release.html_url : null,
-      publishedAt: typeof release.published_at === 'string' ? release.published_at : null,
-      sections: parsed.sections,
-      notesError: null,
-    }
-  }
-
   async function runShell(cmdline) {
     if (!subprocess) throw new Error('subprocess-unavailable')
     const cwd = await baseCwd()
@@ -411,8 +318,7 @@ function apply(ctx) {
   // 插件自身版本:本地读自身 package.json,远端读仓库内 plugin/package.json
   async function readLocalPluginVersion() {
     try {
-      const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
-      const text = await readFile(pkgPath, 'utf8')
+      const text = await readFile(join(PKG_DIR, 'package.json'), 'utf8')
       const data = JSON.parse(text)
       return data && typeof data.version === 'string' ? data.version : null
     } catch (e) {
@@ -435,74 +341,281 @@ function apply(ctx) {
     }
   }
 
-  async function handleCheck(query) {
-    const scopeDsh = query.dsh !== '0'
-    const scopePlugin = query.plugin !== '0'
-    const { settings, error: settingsError } = await readSettings()
+  // 插件自身最新发行版(热更新的内容来源):优先 release tag,缺失时回落远端 package.json
+  async function fetchPluginRelease() {
+    let release = null
     try {
-      let upstream = null
-      let dshError = null
-      if (scopeDsh) {
-        try {
-          upstream = await fetchUpstream()
-        } catch (e) {
-          dshError = e && e.message === 'no-release' ? 'no-release' : 'network'
-          upstream = null
-        }
+      const text = await fetchText('https://api.github.com/repos/' + PLUGIN_REPO + '/releases/latest', 12000)
+      release = JSON.parse(text)
+    } catch (e) { release = null }
+    if (release && typeof release.tag_name === 'string' && release.tag_name) {
+      const parsed = parseVersionLoose(release.tag_name)
+      return {
+        tag: release.tag_name,
+        version: parsed ? parsed.major + '.' + parsed.minor + '.' + parsed.patch + (parsed.pre ? '-' + parsed.pre.join('.') : '') : null,
+        url: typeof release.html_url === 'string' ? release.html_url : null,
+        publishedAt: typeof release.published_at === 'string' ? release.published_at : null,
       }
-      let dsh = null
-      if (upstream) {
-        const latestParsed = parseVersion(upstream.tag)
-        let current = null
-        try { current = await detectLocalDshVersion() } catch (e) { current = null }
-        const currentParsed = current ? parseVersion(current) : null
-        const updateAvailable = !!(currentParsed && latestParsed && compareVersions(currentParsed, latestParsed) < 0)
-        const breakingByVersion = !!(currentParsed && latestParsed && updateAvailable && isBreakingChange(currentParsed, latestParsed))
-        const matches = []
-        for (const section of upstream.sections || []) {
-          for (const item of section.items || []) {
-            if (item.breaking) matches.push({ keyword: item.breaking.keyword, level: item.breaking.level, item: item.text, section: section.key })
-          }
-        }
-        const hasStrong = matches.some((m) => m.level === 'strong')
-        const hasWeak = matches.some((m) => m.level === 'weak')
-        dsh = {
-          current: current || null,
-          latest: upstream.tag,
-          version: latestParsed ? latestParsed.major + '.' + latestParsed.minor + '.' + latestParsed.patch + (latestParsed.pre ? '-' + latestParsed.pre.join('.') : '') : null,
-          updateAvailable,
-          prerelease: !!(latestParsed && latestParsed.pre),
-          localUnreadable: !currentParsed,
-          breaking: breakingByVersion || hasStrong || hasWeak,
-          breakingReason: breakingByVersion ? 'version' : (hasStrong ? 'release-notes' : (hasWeak ? 'release-notes-weak' : null)),
-          signals: matches,
-          sections: upstream.sections || [],
-          releaseUrl: upstream.releaseUrl,
-          publishedAt: upstream.publishedAt,
-          notesError: upstream.notesError,
-        }
-      }
-      let plugin = null
-      if (scopePlugin) {
-        const current = await readLocalPluginVersion()
-        const latest = await fetchRemotePluginVersion()
-        const cp = current ? parseVersion(current) : null
-        const lp = latest ? parseVersion(latest) : null
-        plugin = {
-          current: current || null,
-          latest: latest || null,
-          updateAvailable: !!(cp && lp && compareVersions(cp, lp) < 0),
-          repoUrl: 'https://github.com/' + PLUGIN_REPO,
-          error: latest ? null : 'remote-unavailable',
-        }
-      }
-      return { ok: true, checkedAt: Date.now(), dsh, dshError, plugin, settings, settingsError }
+    }
+    const fallback = await fetchRemotePluginVersion()
+    return fallback ? { tag: null, version: fallback, url: null, publishedAt: null } : null
+  }
+
+  async function readHistory() {
+    try {
+      const text = await readFile(historyFilePath(), 'utf8')
+      const arr = JSON.parse(text)
+      return Array.isArray(arr) ? arr : []
     } catch (e) {
-      const msg = e && e.message ? String(e.message) : 'unknown'
-      return { ok: false, error: msg === 'no-release' ? 'no-release' : 'network', message: msg, settings, settingsError }
+      return []
     }
   }
 
+  async function pushHistory(entry) {
+    const arr = await readHistory()
+    arr.unshift(entry)
+    const next = arr.slice(0, HISTORY_LIMIT)
+    try {
+      await writeJsonAtomic(historyFilePath(), next)
+    } catch (e) { /* 历史写入失败不影响主流程 */ }
+    return next
+  }
+
+  // ---------- 热插拔实现装载 ----------
+  // impl.js 通过 ?v=<version> 导入:URL 变化即 Node ESM 新实例,旧引擎留在内存可回滚。
+  let enginePromise = null
+  let engineError = null
+
+  function buildDeps() {
+    return {
+      fetchText,
+      detectLocalDshVersion,
+      readLocalPluginVersion,
+      fetchRemotePluginVersion,
+      fetchPluginRelease,
+      getSettings: async () => (await readSettings()).settings,
+      repos: { dsh: REPO, plugin: PLUGIN_REPO },
+      log,
+    }
+  }
+
+  async function importImpl(moduleUrl) {
+    const mod = await import(moduleUrl)
+    if (!mod || mod.API_VERSION !== IMPL_CONTRACT) {
+      throw new Error('impl-contract-mismatch:' + String(mod && mod.API_VERSION))
+    }
+    if (typeof mod.createEngine !== 'function') throw new Error('impl-missing-createEngine')
+    const engine = mod.createEngine(buildDeps())
+    if (!engine || typeof engine.check !== 'function') throw new Error('impl-missing-check')
+    return { engine, contract: mod.API_VERSION }
+  }
+
+  async function loadEngine(version, bust) {
+    const base = pathToFileURL(join(LIB_DIR, 'impl.js')).href
+    const query = '?v=' + encodeURIComponent(String(version || 'builtin')) + (bust ? '&t=' + Date.now() : '')
+    try {
+      const { engine, contract } = await importImpl(base + query)
+      return { engine, version: String(version || 'builtin'), contract, error: null }
+    } catch (e) {
+      return { engine: null, version: String(version || 'builtin'), contract: null, error: e && e.message ? String(e.message) : 'impl-load-failed' }
+    }
+  }
+
+  async function swapEngine(version, bust) {
+    const next = await loadEngine(version, bust)
+    if (next.error) throw new Error(next.error)
+    enginePromise = Promise.resolve(next)
+    engineError = null
+    log('info', 'engine swapped → v' + next.version)
+    return next
+  }
+
+  async function getEngine() {
+    const state = await enginePromise
+    if (!state || state.error || !state.engine) {
+      throw new Error('engine-unavailable:' + String((state && state.error) || engineError || 'not-loaded'))
+    }
+    return state
+  }
+
+  enginePromise = loadEngine('builtin', false).then((state) => {
+    if (state.error) {
+      engineError = state.error
+      log('warn', 'engine load failed: ' + state.error)
+    }
+    return state
+  })
+
+  // ---------- 自更新引擎 ----------
+  async function fetchFileAtRef(relPath, ref) {
+    const url = 'https://api.github.com/repos/' + PLUGIN_REPO + '/contents/plugin/' + relPath +
+      (ref ? '?ref=' + encodeURIComponent(ref) : '')
+    const text = await fetchText(url, 15000)
+    const data = JSON.parse(text)
+    if (!data || typeof data.content !== 'string') throw new Error('file-missing:' + relPath)
+    const buf = Buffer.from(data.content.replace(/[^A-Za-z0-9+/=]/g, ''), 'base64')
+    return { text: buf.toString('utf8'), sha: typeof data.sha === 'string' ? data.sha : null }
+  }
+
+  // 写入前的静态校验:先把候选文件落到 .stage,全部通过才允许替换线上文件
+  async function stageAndValidate(files) {
+    await rm(STAGE_DIR, { recursive: true, force: true })
+    await mkdir(STAGE_DIR, { recursive: true })
+    const staged = []
+    for (const file of files) {
+      const flat = file.path.replace(/[\\/]/g, '__')
+      const stagePath = /\.json$/.test(file.path)
+        ? join(STAGE_DIR, flat)
+        : join(STAGE_DIR, /client\.js$/.test(file.path) ? flat + '.cjs' : flat + '.mjs')
+      await writeFile(stagePath, file.text, 'utf8')
+      const item = Object.assign({}, file, { stagePath })
+      if (/package\.json$/.test(file.path)) {
+        const pkg = JSON.parse(file.text)
+        if (!pkg || pkg.name !== 'dsh-update-check') throw new Error('remote-package-invalid')
+        if (typeof pkg.version !== 'string' || !parseVersionLoose(pkg.version)) throw new Error('remote-version-invalid')
+      } else if (/client\.js$/.test(file.path)) {
+        if (!file.text.includes('__ModuleLoader__')) throw new Error('remote-client-invalid')
+        const r = await runShell('node --check "' + stagePath + '"')
+        if (r.exitCode !== 0) throw new Error('remote-client-syntax:' + String(r.stderr || '').trim().slice(0, 160))
+      } else if (/impl\.js$/.test(file.path)) {
+        if (!/API_VERSION\s*=\s*\d+/.test(file.text) || !file.text.includes('createEngine')) throw new Error('remote-impl-invalid')
+        await importImpl(pathToFileURL(stagePath).href + '?stage=' + Date.now())
+      } else if (/index\.js$/.test(file.path)) {
+        if (!file.text.includes('webServer.register') || !/inject\s*=\s*\[/.test(file.text)) throw new Error('remote-supervisor-invalid')
+      }
+      staged.push(item)
+    }
+    return staged
+  }
+
+  async function performSelfUpdate(options) {
+    const opts = options || {}
+    const force = opts.force === true
+    const installed = await readLocalPluginVersion()
+    const release = await fetchPluginRelease()
+    if (!release || !release.version) throw new Error('release-unavailable')
+    const ref = release.tag
+    const remotePkg = await fetchFileAtRef('package.json', ref)
+    const pkg = JSON.parse(remotePkg.text)
+    if (!pkg || pkg.name !== 'dsh-update-check' || typeof pkg.version !== 'string') throw new Error('remote-package-invalid')
+    const target = pkg.version
+    const cmp = compareVersionsLoose(parseVersionLoose(installed), parseVersionLoose(target))
+    if (!force && cmp >= 0) {
+      return { ok: true, updateAvailable: false, from: installed, to: target, ref, reason: 'already-latest', files: [] }
+    }
+
+    const files = []
+    for (const rel of PATCH_FILES) {
+      const item = rel === 'package.json' ? remotePkg : await fetchFileAtRef(rel, ref)
+      const sha = gitBlobSha(item.text)
+      // 下载完整性:GitHub 给出的 blob sha 必须与收到内容一致
+      if (item.sha && item.sha !== sha) throw new Error('download-corrupt:' + rel)
+      // 是否需要替换:与本地现有内容比对(不是与远端自比)
+      let localText = null
+      try {
+        localText = await readFile(join(PKG_DIR, rel), 'utf8')
+      } catch (e) {
+        localText = null
+      }
+      files.push({
+        path: rel,
+        text: item.text,
+        sha,
+        changed: localText === null || gitBlobSha(localText) !== sha,
+        bytes: Buffer.byteLength(item.text, 'utf8'),
+        hot: HOT_FILES.indexOf(rel) >= 0,
+      })
+    }
+    const changed = files.filter((f) => f.changed)
+    const summary = files.map((f) => ({ path: f.path, changed: f.changed, bytes: f.bytes, hot: f.hot }))
+    if (changed.length === 0) {
+      return { ok: true, updateAvailable: true, noop: true, from: installed, to: target, ref, reason: 'content-identical', files: summary }
+    }
+
+    const staged = await stageAndValidate(changed)
+
+    // 备份 → 逐个原子替换(同一目录内 rename)
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const backupDir = join(BAK_DIR, (installed || 'unknown') + '_' + stamp)
+    await mkdir(backupDir, { recursive: true })
+    const restore = []
+    for (const item of staged) {
+      const live = join(PKG_DIR, item.path)
+      let existed = true
+      try {
+        await copyFile(live, join(backupDir, item.path.replace(/[\\/]/g, '__')))
+      } catch (e) {
+        existed = false
+      }
+      restore.push({ live, backup: join(backupDir, item.path.replace(/[\\/]/g, '__')), existed })
+    }
+    const installedFiles = []
+    let implChanged = false
+    let clientChanged = false
+    let indexChanged = false
+    try {
+      for (const item of staged) {
+        const live = join(PKG_DIR, item.path)
+        await mkdir(dirname(live), { recursive: true })
+        await rename(item.stagePath, live)
+        installedFiles.push(item.path)
+        if (item.path === 'lib/impl.js') implChanged = true
+        if (item.path === 'lib/client.js') clientChanged = true
+        if (item.path === 'lib/index.js') indexChanged = true
+      }
+    } catch (e) {
+      // 中断即回滚已替换的文件,保证磁盘上始终是一份自洽的版本
+      for (const item of restore) {
+        try {
+          if (item.existed) await copyFile(item.backup, item.live)
+          else await rm(item.live, { force: true })
+        } catch (err) { /* 尽力而为 */ }
+      }
+      await rm(STAGE_DIR, { recursive: true, force: true })
+      throw new Error('install-failed:' + String(e && e.message || e))
+    }
+    await rm(STAGE_DIR, { recursive: true, force: true })
+
+    let engine = null
+    if (implChanged) {
+      try {
+        const next = await swapEngine(target, true)
+        engine = { version: next.version, contract: next.contract }
+      } catch (e) {
+        // 新实现无法装载:回滚 impl.js 与 client.js,继续用内存中的旧引擎
+        for (const item of restore) {
+          if (!/lib\/(impl|client)\.js$/.test(item.live)) continue
+          try { if (item.existed) await copyFile(item.backup, item.live) } catch (err) { /* ignore */ }
+        }
+        throw new Error('engine-swap-failed:' + String(e && e.message || e))
+      }
+    } else {
+      const state = await getEngine().catch(() => null)
+      engine = state ? { version: state.version, contract: state.contract } : null
+    }
+
+    const result = {
+      ok: true,
+      updateAvailable: true,
+      from: installed,
+      to: target,
+      ref,
+      releaseUrl: release.url,
+      files: summary,
+      installed: installedFiles,
+      backup: backupDir,
+      engine,
+      hot: implChanged || clientChanged,
+      clientReloaded: clientChanged,
+      restartRequired: indexChanged,
+      at: Date.now(),
+    }
+    await pushHistory({ at: result.at, ok: true, from: installed, to: target, ref, files: installedFiles, hot: result.hot, restartRequired: indexChanged })
+    log('info', 'self-update ' + String(installed) + ' → ' + target + (indexChanged ? ' (supervisor: restart required)' : ' (hot)'))
+    return result
+  }
+
+  // ---------- HTTP ----------
   function sendJson(res, status, data) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
     res.end(JSON.stringify(data))
@@ -520,6 +633,63 @@ function apply(ctx) {
       req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
       req.on('error', reject)
     })
+  }
+
+  async function handleCheck(query) {
+    const scopeDsh = query.dsh !== '0'
+    const scopePlugin = query.plugin !== '0'
+    const { settings, error: settingsError } = await readSettings()
+    try {
+      const state = await getEngine()
+      const payload = await state.engine.check({ dsh: scopeDsh, plugin: scopePlugin })
+      if (!payload || payload.ok !== true) {
+        return Object.assign({ ok: false, error: (payload && payload.error) || 'engine', message: payload && payload.message }, { settings, settingsError })
+      }
+      return Object.assign({}, payload, {
+        settings,
+        settingsError,
+        engine: { version: state.version, contract: state.contract },
+      })
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'unknown'
+      const kind = /^engine-unavailable/.test(msg) ? 'engine' : (msg === 'no-release' ? 'no-release' : 'network')
+      return { ok: false, error: kind, message: msg, settings, settingsError }
+    }
+  }
+
+  async function handleSelfUpdate(req, res) {
+    let action = 'update'
+    let force = false
+    try {
+      const raw = await readBody(req, 16384)
+      if (raw) {
+        const body = JSON.parse(raw)
+        if (body && typeof body.action === 'string') action = body.action
+        if (body && body.force === true) force = true
+      }
+    } catch (e) {
+      sendJson(res, 200, { ok: false, error: 'bad-request', message: e && e.message ? String(e.message) : 'bad-request' })
+      return
+    }
+    if (action === 'reload') {
+      try {
+        const installed = await readLocalPluginVersion()
+        const next = await swapEngine(installed || 'reload', true)
+        sendJson(res, 200, { ok: true, action: 'reload', engine: { version: next.version, contract: next.contract } })
+      } catch (e) {
+        sendJson(res, 200, { ok: false, action: 'reload', error: 'engine-swap-failed', message: e && e.message ? String(e.message) : 'reload-failed' })
+      }
+      return
+    }
+    try {
+      const result = await performSelfUpdate({ force })
+      sendJson(res, 200, Object.assign({ action: 'update' }, result))
+    } catch (e) {
+      const message = e && e.message ? String(e.message) : 'self-update-failed'
+      // 任何一次自更新尝试都留痕(成功由 performSelfUpdate 内部记录)
+      await pushHistory({ at: Date.now(), ok: false, action: 'update', error: message })
+      sendJson(res, 200, { ok: false, action: 'update', error: 'self-update-failed', message })
+    }
   }
 
   if (webServer) {
@@ -555,6 +725,30 @@ function apply(ctx) {
         } catch (e) {
           sendJson(res, 200, { ok: false, error: e && e.message ? String(e.message) : 'settings-write-failed' })
         }
+      },
+    }))
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/upd-check/api/self-update',
+      handler: async (req, res) => {
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          const installed = await readLocalPluginVersion()
+          const state = await enginePromise
+          const history = await readHistory()
+          sendJson(res, 200, {
+            ok: true,
+            installed,
+            engine: { version: state && state.version, contract: state && state.contract, error: (state && state.error) || null },
+            contract: IMPL_CONTRACT,
+            hotFiles: HOT_FILES,
+            restartScope: ['lib/index.js'],
+            lastUpdate: history[0] || null,
+            history: history.slice(0, 5),
+          })
+          return
+        }
+        if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: 'method' }); return }
+        await handleSelfUpdate(req, res)
       },
     }))
   }

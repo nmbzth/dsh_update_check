@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.0.0 — 插件自身可持续热更新框架
+
+- **新增（分层架构）**:host 半区拆成两层——`lib/index.js` 为**监督者**（进程级基础设施：服务、设置、三级网络回退、HTTP 路由、热更新引擎），`lib/impl.js` 为**可热插拔实现**（release notes 解析、改动分类、破坏性分级、版本比对），两者以 `API_VERSION` / `IMPL_CONTRACT` 显式契约绑定。检测逻辑此后演进**无需重启 DSH**。
+- **新增（热换入）**:监督者用 `import('...impl.js?v=<version>')` 装载实现（URL 变化即新模块实例），换入前先校验导出与契约，换入是**原子指针替换**；旧引擎留在内存，失败即回退到旧引擎。
+- **新增（自更新引擎，手动触发）**:`POST /upd-check/api/self-update`（`{action:'update'|'reload', force}`）、`GET /upd-check/api/self-update`（状态）。流程：从 `releases/latest` 取目标 tag → contents API 拉取 `plugin/` 四个文件 → **按 git blob sha 判定是否变化**（与本地内容比对，兼作下载完整性校验）→ 候选文件先落 `lib/.stage` 并**全部校验通过**（`package.json` 形状、client 走 `node --check`、impl 走真实 `import` + 契约校验、index 走关键标记）→ 备份到 `lib/.bak/<旧版本>_<时间戳>` → 同目录 `rename` 原子替换 → **热换入新引擎**。任何一步失败都回滚，磁盘与运行中的引擎保持原状。
+- **新增（热更新边界，诚实标注）**:`lib/impl.js`、`lib/client.js` 免重启生效（client 由 `dsh-client-hmr` 推送新 rev 自动重载）；`lib/index.js` 属进程级基础设施，落盘后**下次启动**生效，响应中用 `restartRequired` 单独标注。
+- **新增（历史留痕）**:每次自更新尝试写入 `$DSH_HOME/update-check-history.json`（成功与失败都记，最多 20 条，原子写），状态路由回显最近 5 条。
+- **新增（界面）**:设置页「插件自身更新」卡片新增**热更新按钮**（仅点击触发，绝不静默自动更新）+ 边界说明 + 结果提示（免重启 / 下次启动生效 / 失败已回滚），文案中英双语。
+- **新增（发布流水线）**:`scripts/release.ps1` 一条命令发布——契约门（两个校验脚本）→ CHANGELOG 段落抽取为 Release 说明 → 提交 → API 推送 → 打 tag → 建 GitHub Release（均幂等）。发布即热更新的内容源。
+- **新增（运行期自测）**:`scripts/check-runtime.mjs` 用桩 ctx 装载真实 host 半区并驱动真实 handler，**47 项断言**覆盖检测载荷、设置读写、引擎契约、热更新全链路（校验→替换→换入→备份→历史→幂等→force 零操作→reload）、**失败零损伤回滚**与网络降级。已接入 CI。
+- **修复（变化判定口径）**:自更新原先把「远端 blob sha」与「下载内容 sha」自比，恒判为未变化；现在与**本地现有内容**比对，并用远端 sha 做下载完整性校验。
+- **修复（接口作用域）**:`handleSelfUpdate` 补传 `res`；`reload` 分支用已安装版本作为引擎标签，避免版本显示被 `reload` 覆盖。
+- **工程**:`.gitignore` 忽略热更新运行时产物 `plugin/lib/.stage/`、`plugin/lib/.bak/`；源码契约断言从 53 条扩充到 **86 条**（impl 层断言、契约一致性、先验证后替换、回滚路径、热更新边界、仅 POST 可触发）。
+
 ## v1.9.1 — 修复：已是最新时设置页残留改动描述
 
 - **修复（设置页残留）**:「本次改动」与「破坏性相关描述（完整）」现在**仅在 `updateAvailable === true` 时渲染**。此前 Host 会无条件返回最新 release 的分节内容，导致"明明已是最新版，设置页却仍显示一大堆改动文本"；「查看发布说明」链接同样只在确有更新时出现。

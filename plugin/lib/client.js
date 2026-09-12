@@ -12,6 +12,7 @@ window.__ModuleLoader__.load({
 		const NS = "dsh-update-check";
 		const API_CHECK = "/upd-check/api/check";
 		const API_SETTINGS = "/upd-check/api/settings";
+		const API_SELF_UPDATE = "/upd-check/api/self-update";
 
 		const DICT = {
 			zh: {
@@ -61,10 +62,16 @@ window.__ModuleLoader__.load({
 				"section.improvements": "体验优化",
 				"section.other": "其他变更",
 				"section.sdk": "SDK",
-				"plugin.statusUpdate": "有新版本（请手动替换 plugin/ 目录）",
+				"plugin.statusUpdate": "有新版本（可一键热更新）",
 				"plugin.statusLatest": "已是最新",
 				"plugin.statusUnchecked": "未检查",
 				"plugin.repo": "插件仓库",
+				"btn.hotUpdate": "热更新插件",
+				"btn.updating": "热更新中…",
+				"plugin.hotHint": "免重启:检测/界面代码原子换入并校验,失败自动回滚",
+				"plugin.updatedHot": "热更新完成:{from} → {to}(已生效,无需重启)",
+				"plugin.updatedRestart": "热更新完成:{from} → {to}(进程级变更,下次启动生效)",
+				"plugin.updateFailed": "热更新失败(已回滚):{error}",
 				"value.unknown": "未知",
 				"value.unavailable": "无法获取",
 				"value.dash": "—",
@@ -128,10 +135,16 @@ window.__ModuleLoader__.load({
 				"section.improvements": "Improvements",
 				"section.other": "Other changes",
 				"section.sdk": "SDK",
-				"plugin.statusUpdate": "New version available (replace the plugin/ directory manually)",
+				"plugin.statusUpdate": "New version available (one-click hot update)",
 				"plugin.statusLatest": "Up to date",
 				"plugin.statusUnchecked": "Not checked",
 				"plugin.repo": "Plugin repository",
+				"btn.hotUpdate": "Hot-update plugin",
+				"btn.updating": "Hot-updating…",
+				"plugin.hotHint": "No restart: engine and UI code are validated and swapped atomically, with automatic rollback on failure",
+				"plugin.updatedHot": "Hot update done: {from} → {to} (live now, no restart needed)",
+				"plugin.updatedRestart": "Hot update done: {from} → {to} (process-level change, applies on next start)",
+				"plugin.updateFailed": "Hot update failed (rolled back): {error}",
 				"value.unknown": "Unknown",
 				"value.unavailable": "Unavailable",
 				"value.dash": "—",
@@ -214,7 +227,8 @@ window.__ModuleLoader__.load({
 				dsh: null, plugin: null, settings: null,
 				dshError: null, settingsError: null,
 				checkedAt: null, errorKind: null, message: null,
-				expanded: false, bannerVisible: true, dismissedLatest: null
+				expanded: false, bannerVisible: true, dismissedLatest: null,
+				updatePhase: "idle", updateMessage: null, updateResult: null
 			};
 			const listeners = new Set();
 			return {
@@ -269,7 +283,10 @@ window.__ModuleLoader__.load({
 				dshError: null,
 				settingsError: null,
 				expanded: false,
-				dismissedLatest: null
+				dismissedLatest: null,
+				updatePhase: "idle",
+				updateMessage: null,
+				updateResult: null
 			});
 
 			// 注册双语字典并绑定翻译;locale 服务缺失时回退内置中文
@@ -332,6 +349,31 @@ window.__ModuleLoader__.load({
 					else store.set({ settingsError: (res && res.error) || "settings-write-failed" });
 				} catch (e) {
 					store.set({ settingsError: e && e.message ? String(e.message) : "settings-write-failed" });
+				}
+			}
+
+			// 插件自身热更新:只由用户点击触发(绝不静默自动更新);
+			// 宿主侧先落 .stage 校验、再原子替换、失败自动回滚,这里只呈现结果。
+			async function doSelfUpdate() {
+				store.set({ updatePhase: "running", updateMessage: null, updateResult: null });
+				try {
+					const res = await apiCall(API_SELF_UPDATE, "POST", { action: "update" });
+					if (!res || res.ok !== true) {
+						store.set({
+							updatePhase: "error",
+							updateMessage: (res && (res.message || res.error)) || "self-update-failed"
+						});
+						return;
+					}
+					if (res.updateAvailable === false || res.noop === true) {
+						store.set({ updatePhase: "done", updateResult: { from: res.from, to: res.to, restartRequired: false, noop: true } });
+						await doCheck({ dsh: true, plugin: true, source: "manual" });
+						return;
+					}
+					store.set({ updatePhase: "done", updateResult: res, updateMessage: null });
+					await doCheck({ dsh: true, plugin: true, source: "manual" });
+				} catch (e) {
+					store.set({ updatePhase: "error", updateMessage: e && e.message ? String(e.message) : "self-update-failed" });
 				}
 			}
 
@@ -567,6 +609,30 @@ window.__ModuleLoader__.load({
 							? react.createElement("div", null,
 								react.createElement("a", { style: STYLE.link, href: plugin.repoUrl, target: "_blank", rel: "noreferrer" }, t("plugin.repo"))
 							)
+							: null,
+						// 热更新入口:仅在有新版本时出现,且只由点击触发
+						plugin && plugin.updateAvailable
+							? react.createElement("div", { style: STYLE.actions },
+								react.createElement("button", {
+									style: Object.assign({}, STYLE.actionBtn, STYLE.btnPrimary),
+									disabled: state.updatePhase === "running",
+									onClick: () => { doSelfUpdate().catch(() => {}); }
+								}, t(state.updatePhase === "running" ? "btn.updating" : "btn.hotUpdate")),
+								react.createElement("span", { style: STYLE.dim }, t("plugin.hotHint"))
+							)
+							: null,
+						state.updatePhase === "done" && state.updateResult
+							? react.createElement("div", { style: STYLE.okText },
+								state.updateResult.noop
+									? t("plugin.statusLatest")
+									: t(state.updateResult.restartRequired ? "plugin.updatedRestart" : "plugin.updatedHot", {
+										from: state.updateResult.from || "",
+										to: state.updateResult.to || ""
+									})
+							)
+							: null,
+						state.updatePhase === "error"
+							? react.createElement("div", { style: STYLE.error }, t("plugin.updateFailed", { error: state.updateMessage || "" }))
 							: null
 					),
 

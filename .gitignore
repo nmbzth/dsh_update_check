@@ -15,3 +15,7 @@ Thumbs.db
 
 # Temp
 *.tmp
+
+# 热更新运行时产物(候选文件暂存与备份,不应入库)
+plugin/lib/.stage/
+plugin/lib/.bak/
