@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.2 — 区分「GitHub 限流」与「网络不通」
+
+- **修复（错误分类）**:上游返回 **403/429** 时此前一律归类 `network`，界面说「无法连接 GitHub，检查失败」——把**匿名 API 限流（60 次/小时）**误报成网络故障，用户重试也无用。现在单独归类 `rate-limit`：顶部横幅提示「GitHub 拒绝请求：匿名 API 限流（60 次/小时）已用尽，稍后重试即可」，设置页「DSH 更新」卡片给出同样的专用文案。中英双语。
+- **修复（只影响上游）**:限流只作用于 DSH 上游检查，插件自身检测（不同仓库、独立请求）不受影响，界面照常显示。
+- **工程（联网验证脚本）**:`scripts/verify-real-selfupdate.mjs` 增加**配额门禁**——先读 `/rate_limit`，剩余不足 15 次直接输出 `SKIPPED`（exit 0）；运行中途耗尽配额时，上游检测一项转为 `SKIP` 而不是误报 `FAIL`。避免把配额问题当成框架缺陷。
+- CI/自测新增断言：impl 的 `classifyUpstreamError`（`403|429` → `rate-limit`）与在 `check` 中的复用；client 横幅/设置页两条限流文案与分支；运行期新增「上游 403 → `rate-limit`，且插件自身检测不受影响」。
+
 ## v2.0.1 — 本机 DSH 版本检测提速 150×、覆盖非 npm 布局,并自报来源
 
 - **修复（检测渠道）**:本机 DSH 版本原先只靠 `npm ls -g @deepseek-ai/dsh` 起 shell 探测——实测 **881ms**,且依赖 shell/PATH/npm,对 **pnpm / bun / 本地克隆**安装读不到（README 里那条 ⚠️ 就是它，表现为「无法读取本地版本」或读到另一份安装）。现在**先走模块系统解析**（`createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json')`）：命中的是「按 Node 解析规则真正会被加载的那份安装」，实测 **6ms**，无需 shell，并对上述布局同样有效；失败才回落到原 npm 全局探测。

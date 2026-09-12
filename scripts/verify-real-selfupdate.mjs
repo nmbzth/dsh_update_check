@@ -83,14 +83,29 @@ try {
   }
   process.env.DSH_HOME = box
 
-  // 先探一次网络:不可达就 SKIP,不误报
-  let releaseTag = null
+  // 匿名配额只有 60 次/小时:先看剩余量,不够就 SKIP —— 不把配额问题误报成框架缺陷
+  let quota = null
   try {
-    const body = await getText('https://api.github.com/repos/nmbzth/dsh_update_check/releases/latest')
-    releaseTag = JSON.parse(body).tag_name
-  } catch (e) {
-    console.log('SKIP  GitHub 不可达,跳过联网端到端验证:' + String(e && e.message || e))
+    quota = JSON.parse(await getText('https://api.github.com/rate_limit')).resources.core.remaining
+  } catch (e) { /* 读不到就按「够用」继续,后续失败会如实报出 */ }
+  console.log('   GitHub 匿名配额剩余:' + (quota === null ? '未知' : quota))
+
+  // 先探一次网络与配额:不可达/不够用就 SKIP,不误报
+  let releaseTag = null
+  if (quota !== null && quota < 15) {
+    console.log('SKIP  匿名配额不足(剩余 ' + quota + '/60),跳过联网端到端验证;稍后重跑即可')
     console.log('RESULT: SKIPPED')
+  } else {
+    try {
+      const body = await getText('https://api.github.com/repos/nmbzth/dsh_update_check/releases/latest')
+      releaseTag = JSON.parse(body).tag_name
+    } catch (e) {
+      const msg = String(e && e.message || e)
+      console.log(/403|429/.test(msg)
+        ? 'SKIP  GitHub 拒绝请求(匿名 API 限流),跳过联网端到端验证'
+        : 'SKIP  GitHub 不可达,跳过联网端到端验证:' + msg)
+      console.log('RESULT: SKIPPED')
+    }
   }
 
   if (releaseTag) {
@@ -158,7 +173,11 @@ try {
 
     const r = await call('/upd-check/api/check', 'GET')
     check(r.ok === true && r.engine.version === targetVersion, '换入后引擎版本 = ' + targetVersion)
-    check(r.dsh && typeof r.dsh.latest === 'string' && /^dsh-v\d/.test(r.dsh.latest), '真实上游检测正常(latest=' + (r.dsh && r.dsh.latest) + ')')
+    if (r.dshError === 'rate-limit') {
+      console.log('SKIP  真实上游检测(配额在本次运行中途耗尽)')
+    } else {
+      check(r.dsh && typeof r.dsh.latest === 'string' && /^dsh-v\d/.test(r.dsh.latest), '真实上游检测正常(latest=' + (r.dsh && r.dsh.latest) + ')')
+    }
     check(r.plugin && r.plugin.current === targetVersion && r.plugin.updateAvailable === false, '插件自身判定为已最新')
 
     const baks = await readdir(join(box, 'lib/.bak')).catch(() => [])

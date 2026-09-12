@@ -133,14 +133,15 @@ pwsh -NoProfile -File scripts/release.ps1
 - **「无法读取本地版本」**：DSH 不是通过 npm 全局安装的；远端版本仍会正常显示。
 - **点「稍后」后横幅又出现**：客户端记住了忽略的版本；同一版本在连接重置、页面刷新、设置页手动检查后都不会再弹，只有发布新版本（`latest` 变化）才会再次提醒。
 - **设置页「立即检查」会弹顶部横幅**：手动检查只更新设置页状态，不再弹顶部横幅；顶部横幅保留给自动检查与横幅操作（重试）。
+- **提示「GitHub 拒绝请求 / 匿名 API 限流已用尽」**：GitHub 未认证配额为 60 次/小时/IP。插件已把这种情况与真正的网络故障区分开（HTTP 403/429 → `rate-limit`），不再说成「无法连接 GitHub」；插件自身检测走的是另一个仓库，不受影响。按提示稍后重试即可（`/rate_limit` 可查重置时间）。
 - **黄色预警误报/漏报**：破坏性判定以语义版本为主（确定性），发布说明关键词为辅；弱信号只提示「可能」并展示原文片段，由你核实；若官方发布说明措辞不含关键词，可能漏报 release-notes 信号，但版本信号仍会兜底。
 
 ## 开发与贡献
 
 - 插件本体：`plugin/` 目录 = npm 包 `dsh-update-check`（`lib/index.js` 监督者 + `lib/impl.js` 可热插拔实现 + `lib/client.js` 浏览器 bundle）。
 - 本地校验：
-  - `node scripts/check-src.js` —— 语法与源码契约检查（91 条断言，CI 同样执行）；
-  - `node scripts/check-runtime.mjs` —— 运行期契约检查：在临时沙箱里用桩 `ctx` 装载真实 host 半区并驱动其真实 HTTP handler，覆盖检测载荷、设置读写、引擎契约与热更新全链路（含**失败零损伤回滚**与两条版本检测渠道），54 条断言，CI 同样执行；
+  - `node scripts/check-src.js` —— 语法与源码契约检查（95 条断言，CI 同样执行）；
+  - `node scripts/check-runtime.mjs` —— 运行期契约检查：在临时沙箱里用桩 `ctx` 装载真实 host 半区并驱动其真实 HTTP handler，覆盖检测载荷、设置读写、引擎契约与热更新全链路（含**失败零损伤回滚**与两条版本检测渠道），56 条断言，CI 同样执行；
   - `node scripts/verify-real-selfupdate.mjs [包目录]` —— **可选，需联网**：把包复制到临时目录、降到 `0.0.1` 并制造内容漂移，然后**真的**从已发布的 GitHub Release 自我更新一次，再断言文件、运行中引擎版本与备份。全程不动源目录；GitHub 不可达时输出 `SKIPPED` 并以 0 退出。
 - 发布：`pwsh -NoProfile -File scripts/release.ps1`（先 bump `plugin/package.json`、写好 CHANGELOG 段落，再执行）。
 - 改动「监督者 ↔ 实现」契约时，需同步 bump `lib/index.js` 的 `IMPL_CONTRACT` 与 `lib/impl.js` 的 `API_VERSION`；CI 会比对两者是否一致。

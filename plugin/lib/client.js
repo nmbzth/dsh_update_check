@@ -29,6 +29,7 @@ window.__ModuleLoader__.load({
 				"banner.retry": "重试",
 				"banner.close": "关闭",
 				"banner.networkError": "无法连接 GitHub，检查失败（网络不佳或 GitHub 不可达）",
+				"banner.rateLimit": "GitHub 拒绝请求：匿名 API 限流（60 次/小时）已用尽，稍后重试即可",
 				"banner.noRelease": "GitHub 上未找到版本信息",
 				"banner.breakingHint": "该版本包含疑似破坏性变更，请确认插件兼容性后再更新：",
 				"banner.pluginHint": "插件自身有新版本：{from} → {to}（见设置页）",
@@ -87,6 +88,7 @@ window.__ModuleLoader__.load({
 				"switch.verboseHint": "开：横幅直接展示改动细节；关：只显示版本提示，点「详情」展开",
 				"error.checkFailed": "检查失败：{message}",
 				"error.upstreamFailed": "上游检查失败：{error}",
+				"error.upstreamRateLimit": "上游检查失败：GitHub 匿名 API 限流（60 次/小时）已用尽，稍后重试即可",
 				"error.settingsSave": "设置保存失败：{error}",
 				"signal.strong": "强信号",
 				"signal.weak": "弱信号",
@@ -106,6 +108,7 @@ window.__ModuleLoader__.load({
 				"banner.retry": "Retry",
 				"banner.close": "Close",
 				"banner.networkError": "Cannot reach GitHub — check failed (network issue or GitHub unreachable)",
+				"banner.rateLimit": "GitHub rejected the request: the anonymous API limit (60/hour) is exhausted — try again later",
 				"banner.noRelease": "No version info found on GitHub",
 				"banner.breakingHint": "This version may contain breaking changes — verify plugin compatibility before updating:",
 				"banner.pluginHint": "The plugin itself has a new version: {from} → {to} (see Settings)",
@@ -164,6 +167,7 @@ window.__ModuleLoader__.load({
 				"switch.verboseHint": "On: expand details in the banner; Off: show only the version line with a Details button",
 				"error.checkFailed": "Check failed: {message}",
 				"error.upstreamFailed": "Upstream check failed: {error}",
+				"error.upstreamRateLimit": "Upstream check failed: GitHub's anonymous API limit (60/hour) is exhausted — try again later",
 				"error.settingsSave": "Failed to save settings: {error}",
 				"signal.strong": "Strong",
 				"signal.weak": "Weak",
@@ -486,7 +490,9 @@ window.__ModuleLoader__.load({
 						{ label: t("banner.later"), primary: false, onClick: () => store.set({ phase: "idle", dismissedLatest: updateKey }) }
 					];
 				} else if (state.phase === "error") {
-					title = t(state.errorKind === "no-release" ? "banner.noRelease" : "banner.networkError");
+					title = t(state.errorKind === "no-release"
+						? "banner.noRelease"
+						: (state.errorKind === "rate-limit" ? "banner.rateLimit" : "banner.networkError"));
 					buttons = [
 						{ label: t("banner.retry"), primary: true, onClick: () => { doCheck({ source: "banner" }).catch(() => {}); } },
 						{ label: t("banner.close"), primary: false, onClick: () => store.set({ phase: "idle" }) }
@@ -611,7 +617,10 @@ window.__ModuleLoader__.load({
 							)
 							: (dsh && dsh.updateAvailable ? react.createElement("div", { style: STYLE.dim }, t("section.none")) : null),
 						state.dshError
-							? react.createElement("div", { style: STYLE.error }, t("error.upstreamFailed", { error: state.dshError }))
+							? react.createElement("div", { style: STYLE.error },
+								state.dshError === "rate-limit"
+									? t("error.upstreamRateLimit")
+									: t("error.upstreamFailed", { error: state.dshError }))
 							: null
 					),
 

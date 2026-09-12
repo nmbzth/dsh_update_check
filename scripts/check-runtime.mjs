@@ -322,7 +322,24 @@ const r5 = await call('/upd-check/api/check', 'GET')
 offline = false
 check(r5.ok === true && r5.dsh === null && r5.dshError === 'network', '网络不可达时降级为 dshError=network')
 
-// ⑩ 本机版本检测渠道:模块解析优先于 npm 全局探测,并自报来源
+// ⑩ 限流与网络不可达必须区分(403/429 → rate-limit)
+let rateLimited = false
+const baseFetch = webService.fetch
+webService.fetch = async (request) => {
+  if (rateLimited && /deepseek-harness/.test(String(request.url))) {
+    const e = new Error('http-403')
+    throw e
+  }
+  return baseFetch(request)
+}
+rateLimited = true
+const r8 = await call('/upd-check/api/check', 'GET')
+rateLimited = false
+check(r8.ok === true && r8.dsh === null && r8.dshError === 'rate-limit', '上游 403 归类为 rate-limit(实际 ' + r8.dshError + ')')
+check(r8.plugin && r8.plugin.updateAvailable === true, '限流只影响 DSH 上游,插件自身检测不受影响')
+webService.fetch = baseFetch
+
+// ⑪ 本机版本检测渠道:模块解析优先于 npm 全局探测,并自报来源
 check(r1.dsh && r1.dsh.source === 'npm-global', '沙箱无 dsh 包时回落 npm 全局探测(实际 ' + (r1.dsh && r1.dsh.source) + ')')
 check(r1.dsh && r1.dsh.current === '0.1.0-rc.7', '回落渠道读到 npm 桩版本')
 await mkdir(join(box, 'node_modules/@deepseek-ai/dsh'), { recursive: true })

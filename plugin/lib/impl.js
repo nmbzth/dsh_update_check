@@ -142,6 +142,15 @@ export function isBreakingChange(current, latest) {
   return false
 }
 
+// 上游错误的可行动分类:连不上 ≠ 被限流 —— 后者重试时机不同,提示必须分开
+function classifyUpstreamError(e) {
+  const msg = String((e && e.message) || '')
+  if (msg === 'no-release') return 'no-release'
+  // GitHub 匿名配额 60 次/小时,超限返回 403(偶见 429)
+  if (/^http-(403|429)$/.test(msg)) return 'rate-limit'
+  return 'network'
+}
+
 /**
  * 创建一次引擎实例。监督者在初始装载与每次热更新后都会调用。
  * deps 由监督者提供(进程级基础设施),本模块只依赖这组能力,不直接触碰 ctx。
@@ -236,7 +245,7 @@ export function createEngine(deps) {
         try {
           upstream = await fetchUpstream()
         } catch (e) {
-          dshError = e && e.message === 'no-release' ? 'no-release' : 'network'
+          dshError = classifyUpstreamError(e)
           upstream = null
         }
       }
@@ -294,9 +303,9 @@ export function createEngine(deps) {
       return { ok: true, checkedAt: Date.now(), dsh, dshError, plugin }
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'unknown'
-      return { ok: false, error: msg === 'no-release' ? 'no-release' : 'network', message: msg }
+      return { ok: false, error: classifyUpstreamError(e), message: msg }
     }
   }
 
-  return { check, fetchUpstream, parseReleaseNotes, parseVersion, compareVersions, isBreakingChange, matchSignals }
+  return { check, fetchUpstream, parseReleaseNotes, parseVersion, compareVersions, isBreakingChange, matchSignals, classifyUpstreamError }
 }
